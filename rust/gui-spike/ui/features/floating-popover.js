@@ -17,7 +17,7 @@ import {
   hide,
   inline,
   limitShift,
-} from "@floating-ui/dom";
+} from "../vendor/@floating-ui/dom.js";
 
 export const isFloatingUiDomPowered = true;
 export {

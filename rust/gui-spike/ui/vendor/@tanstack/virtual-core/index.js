@@ -1,5 +1,5 @@
 import { createLazyMeasurementsView, getMeasurementKey } from "./lazy-measurements.js";
-import { memo, approxEqual, notUndefined, debounce } from "./utils.js";
+import { memo, approxEqual, notUndefined, debounce, isDevelopment } from "./utils.js";
 import { flingCaught, externalRetiresCommand, flingSpedUp, classifyScrollEvent } from "./scroll-classifier.js";
 import { IosGesture, isIOSWebKit, momentumOverridesWrites } from "./ios-gesture.js";
 import { _resetIOSDetectionForTests } from "./ios-gesture.js";
@@ -476,7 +476,7 @@ class Virtualizer {
         this.notify(isScrolling);
       },
       {
-        key: process.env.NODE_ENV !== "production" && "maybeNotify",
+        key: isDevelopment() && "maybeNotify",
         debug: () => this.options.debug,
         initialDeps: [
           this.isScrolling,
@@ -902,7 +902,7 @@ class Virtualizer {
         return measurements;
       },
       {
-        key: process.env.NODE_ENV !== "production" && "getMeasurements",
+        key: isDevelopment() && "getMeasurements",
         debug: () => this.options.debug
       }
     );
@@ -934,7 +934,7 @@ class Virtualizer {
         return this.range;
       },
       {
-        key: process.env.NODE_ENV !== "production" && "calculateRange",
+        key: isDevelopment() && "calculateRange",
         debug: () => this.options.debug
       }
     );
@@ -967,7 +967,7 @@ class Virtualizer {
         });
       },
       {
-        key: process.env.NODE_ENV !== "production" && "getVirtualIndexes",
+        key: isDevelopment() && "getVirtualIndexes",
         debug: () => this.options.debug
       }
     );
@@ -1126,7 +1126,7 @@ class Virtualizer {
         return virtualItems;
       },
       {
-        key: process.env.NODE_ENV !== "production" && "getVirtualItems",
+        key: isDevelopment() && "getVirtualItems",
         debug: () => this.options.debug
       }
     );
@@ -1429,7 +1429,7 @@ class Virtualizer {
   // synchronous so the grown transforms commit in the same paint (#1227).
   applyScrollAdjustment(delta, behavior) {
     if (delta === 0) return false;
-    if (process.env.NODE_ENV !== "production" && this.options.debug) {
+    if (isDevelopment() && this.options.debug) {
       console.info("correction", delta);
     }
     this._followOffsetTarget(delta);

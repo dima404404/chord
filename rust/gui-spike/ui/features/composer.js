@@ -8,7 +8,7 @@
  * с 1800 символов (CMP-06). Отправки нет — спайк без сети, это видно в
  * `#composer-hint`/`.chat-notice`.
  */
-import { createKeybindingsHandler } from "tinykeys";
+import { createKeybindingsHandler } from "../vendor/tinykeys.js";
 import { createComposerAutocompleteController } from "./composer-autocomplete.js";
 import { UIError, asUIError } from "./errors.js";
 import {

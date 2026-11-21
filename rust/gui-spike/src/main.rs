@@ -1952,10 +1952,15 @@ fn spawn_system_tray_indicator(app_handle: tauri::AppHandle) {
     let _ = builder.build(&app_handle);
 }
 
+fn fixture_auth_enabled(value: Option<&std::ffi::OsStr>) -> bool {
+    value == Some(std::ffi::OsStr::new("1"))
+}
+
 fn main() {
     chord_platform::screencast::allow_ptrace_yama();
-    let is_headless_ci = std::env::var_os("SPIKE_EXIT_AFTER_MS").is_some()
-        || std::env::var_os("SPIKE_AUTH_DISABLED").is_some();
+    // The normal launcher exports 0. Enter the offline fixture only on explicit opt-in.
+    let fixture_auth = fixture_auth_enabled(std::env::var_os("SPIKE_AUTH_DISABLED").as_deref());
+    let is_headless_ci = std::env::var_os("SPIKE_EXIT_AFTER_MS").is_some() || fixture_auth;
     if is_headless_ci && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
         std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
     }
@@ -1995,7 +2000,7 @@ fn main() {
             }
             _ => {}
         })
-        .setup(|app| {
+        .setup(move |app| {
             // Set custom test window title if requested by test harness.
             if let Some(window) = app.get_webview_window("main") {
                 if let Ok(title) = std::env::var("SPIKE_WINDOW_TITLE") {
@@ -2006,8 +2011,8 @@ fn main() {
                 let _ = window.set_focus();
             }
             // Marker for cold-start benchmark harness indicating window ready state.
-            // When SPIKE_AUTH_DISABLED is set, inject bypass flag for AT-SPI / offline smoke tests.
-            if std::env::var("SPIKE_AUTH_DISABLED").is_ok() {
+            // The renderer receives the same explicit fixture decision as startup.
+            if fixture_auth {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.eval("window.__SPIKE_AUTH_DISABLED__ = true;");
                 }
@@ -2025,9 +2030,7 @@ fn main() {
             let db_bridge = db_worker.bridge();
             app.manage(Arc::new(db_worker));
             app.manage(db_bridge);
-            if std::env::var_os("SPIKE_EXIT_AFTER_MS").is_none()
-                && std::env::var_os("SPIKE_AUTH_DISABLED").is_none()
-            {
+            if !is_headless_ci {
                 spawn_system_tray_indicator(app.handle().clone());
             }
             if let Ok(ms) = std::env::var("SPIKE_EXIT_AFTER_MS") {
@@ -2145,6 +2148,14 @@ fn main() {
 #[cfg(test)]
 mod wiring_tests {
     use super::*;
+
+    #[test]
+    fn launcher_default_stays_in_normal_auth() {
+        for value in [None, Some("0"), Some(""), Some("false"), Some("unexpected")] {
+            assert!(!fixture_auth_enabled(value.map(std::ffi::OsStr::new)));
+        }
+        assert!(fixture_auth_enabled(Some(std::ffi::OsStr::new("1"))));
+    }
     use chord_client::bff_domains_router::{
         BffDomainAction, BffResolvedAction, UpdateGuildOnboardingRequest,
     };

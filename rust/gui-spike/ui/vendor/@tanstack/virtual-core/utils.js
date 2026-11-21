@@ -1,10 +1,14 @@
+// The embedded webview loads this ESM directly, without a Node runtime.
+function isDevelopment() {
+  return typeof process !== "undefined" && process.env.NODE_ENV !== "production";
+}
 function memo(getDeps, fn, opts) {
   let deps = opts.initialDeps ?? [];
   let result;
   let isInitial = true;
   function memoizedFunction() {
     var _a;
-    const debugEnabled = process.env.NODE_ENV !== "production" && !!opts.key && !!((_a = opts.debug) == null ? void 0 : _a.call(opts));
+    const debugEnabled = isDevelopment() && !!opts.key && !!((_a = opts.debug) == null ? void 0 : _a.call(opts));
     let depTime = 0;
     if (debugEnabled) depTime = Date.now();
     const newDeps = getDeps();
@@ -78,6 +82,7 @@ const debounce = (targetWindow, fn, ms) => {
 export {
   approxEqual,
   debounce,
+  isDevelopment,
   memo,
   notUndefined
 };

@@ -19,7 +19,7 @@ import {
   shift,
   offset,
   autoUpdate,
-} from "@floating-ui/dom";
+} from "../vendor/@floating-ui/dom.js";
 import { computeFloatingPosition } from "./floating-popover.js";
 
 /** Флаг интеграции с `@floating-ui/dom`. */

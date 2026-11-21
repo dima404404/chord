@@ -16,8 +16,8 @@ import {
   flip,
   shift,
   offset,
-} from "@floating-ui/dom";
-import { Virtualizer } from "@tanstack/virtual-core";
+} from "../vendor/@floating-ui/dom.js";
+import { Virtualizer } from "../vendor/@tanstack/virtual-core/index.js";
 import { computeFloatingPosition } from "./floating-popover.js";
 
 export const isFloatingUiDomPowered = typeof computePosition === "function";

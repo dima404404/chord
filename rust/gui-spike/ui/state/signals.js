@@ -10,7 +10,7 @@ import {
   computed as coreComputed,
   effect as coreEffect,
   batch as coreBatch,
-} from "@preact/signals-core";
+} from "../vendor/@preact/signals-core.js";
 
 export const isSignalsCorePowered = true;
 

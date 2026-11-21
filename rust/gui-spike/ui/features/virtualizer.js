@@ -10,7 +10,7 @@ import {
   elementScroll,
   defaultRangeExtractor,
   defaultKeyExtractor,
-} from "@tanstack/virtual-core";
+} from "../vendor/@tanstack/virtual-core/index.js";
 
 export const isTanstackVirtualPowered = true;
 export { Virtualizer, elementScroll, defaultRangeExtractor, defaultKeyExtractor };

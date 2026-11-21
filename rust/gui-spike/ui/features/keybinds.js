@@ -16,7 +16,7 @@ import {
   createKeybindingsHandler,
   parseKeybinding,
   matchKeybindingPress,
-} from "tinykeys";
+} from "../vendor/tinykeys.js";
 
 export const isTinykeysPowered = true;
 export { tinykeys, createKeybindingsHandler, parseKeybinding, matchKeybindingPress };

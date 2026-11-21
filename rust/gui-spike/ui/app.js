@@ -2332,6 +2332,7 @@ function boot() {
   let openLiveComposerEmojiPickerRef = null;
   /** @type {((includeModals?: boolean) => void) | null} */
   let closeLiveVoicePopoutsRef = null;
+  const fixtureAuth = (/** @type {any} */ (globalThis).__SPIKE_AUTH_DISABLED__) === true;
   const isLiveSession = () =>
     typeof globalThis.Image === "function";
   const router = createScreenRouter({
@@ -5979,7 +5980,7 @@ function boot() {
     openSelfProfileStatusPopover();
   });
   const cleanupSpikeBenchmarkArtifacts = () => {
-    if (!isLiveSession() || (/** @type {any} */ (globalThis).__QA__)) return;
+    if (fixtureAuth || !isLiveSession() || (/** @type {any} */ (globalThis).__QA__)) return;
     // В живом режиме приложения скрываем синтетические кнопки спайк-бенчмарка
     // ("Чат 100k", "Эмодзи-пикер", "Участники 24k", дубликат "Настройки" в рейле серверов),
     // метрики бенчмарка в верхней полосе и очищаем тестовые списки (100k фейковых сообщений и 24k фейковых пользователей).
@@ -7350,6 +7351,8 @@ function boot() {
       const list = byId("chat-list");
       const target = /** @type {any} */ (list);
       if (target && typeof target.focus === "function") target.focus();
+      // The fixture profile uses local demo data and has no authenticated session.
+      if (fixtureAuth) return;
       // L-01: сетевой статус актуален только в активном приложении (после входа).
       if (isLiveSession() && !(/** @type {any} */ (globalThis).__QA__)) {
         const attachBtn = document.querySelector(".composer-attach");

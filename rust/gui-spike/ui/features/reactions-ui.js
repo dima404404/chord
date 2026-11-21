@@ -1,4 +1,4 @@
-import { signal, effect, batch } from "@preact/signals-core";
+import { signal, effect, batch } from "../vendor/@preact/signals-core.js";
 
 export const isSignalsCorePowered = typeof signal === "function";
 
