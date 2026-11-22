@@ -64,10 +64,13 @@ def validate_relro_mapping(segments):
     end = start + relro[6]
     if end % 16384:
         raise IntegrityError("GNU_RELRO must end on a 16 KiB page boundary")
-    loads = [segment for segment in segments if segment[0] == 1 and segment[1] & 2]
+    loads = sorted(
+        (segment for segment in segments if segment[0] == 1 and segment[1] & 2 and segment[6]),
+        key=lambda segment: segment[3],
+    )
     for page_size in (4096, 16384):
         mapped_end = start // page_size * page_size
-        for load in sorted(loads, key=lambda segment: segment[3]):
+        for load in loads:
             load_start = load[3] // page_size * page_size
             load_end = (load[3] + load[6] + page_size - 1) // page_size * page_size
             if load_start <= mapped_end < load_end:

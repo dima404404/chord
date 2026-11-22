@@ -117,8 +117,9 @@ test('a truncated ELF fails validation instead of becoming a release', linux, t 
 
 test('RELRO cannot protect unmapped pages on a 4 KiB ARM kernel', linux, () => {
   // The first writable LOAD ends before the mapped page following the RELRO boundary.
+  const writableLoad = [1, 6, 0, 0x25c5710, 0, 0x16c1c0, 0x16c1c0, 16384];
   const layout = [
-    [1, 6, 0, 0x25c5710, 0, 0x16c1c0, 0x16c1c0, 16384],
+    writableLoad,
     [1, 6, 0, 0x27358d0, 0, 0x20, 0x20, 16384],
     [0x6474e552, 4, 0, 0x25c5710, 0, 0x16c1c0, 0x16e8f0, 1],
   ];
@@ -127,7 +128,7 @@ test('RELRO cannot protect unmapped pages on a 4 KiB ARM kernel', linux, () => {
   assert.notEqual(broken.status, 0);
   assert.match(broken.stderr, /GNU_RELRO includes unmapped 4 KiB pages/);
 
-  layout[0][6] = 0x16e8f0;
+  writableLoad[6] = 0x16e8f0;
   const padded = oracle(code, [JSON.stringify(layout)]);
   assert.equal(padded.status, 0, padded.stderr);
 });

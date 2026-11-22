@@ -142,3 +142,17 @@ The AppImage ABI limit applies to every bundled library as well as the GUI.
 Packaging on a newer Linux host can pull in libraries requiring newer GLIBC
 symbols. Package on Ubuntu 22.04 or supply compatible libraries through
 `CHORD_APPIMAGE_LIBRARY_DIR`. Weak version requirements are tracked separately.
+
+## CP-010 — Verify ARM64 RELRO against actual mapped pages
+
+A native Ubuntu 22.04 ARM64 smoke run failed before main with a loader memory
+protection error. LLD 14 rounded the GNU_RELRO end to 16 KiB without extending
+its writable LOAD mapping. On the 4 KiB kernel the requested range crossed
+unmapped pages. The upstream linker fix is described in
+[LLVM PR 66042](https://github.com/llvm/llvm-project/pull/66042).
+
+Clang selects LLD from the pinned Rust toolchain. The ARM builder checks the
+actual linker and a linked SDK probe before Cargo runs. The ELF verifier
+requires a mapped RELRO range at both page sizes. Native CI checks the real
+binary and the AppImage after packaging. The static 16 KiB check cannot
+substitute for a run on a 16 KiB kernel.
