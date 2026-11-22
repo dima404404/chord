@@ -23,7 +23,6 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SECRET_SCAN_SCRIPT = join(ROOT, "scripts", "secret-scan.mjs");
 const SBOM_SCRIPT = join(ROOT, "scripts", "sbom.mjs");
-const SBOM_PATH = join(ROOT, "rust", "dist", "sbom.spdx.json");
 const DIST_BIN_PATH = join(ROOT, "rust", "dist", "discord-gpui");
 const REPORT_RW44_PATH = join(ROOT, "waves", "RW-44", "QUALITY", "SECURITY-AUDIT-REPORT.md");
 const REPORT_RW45_PATH = join(ROOT, "waves", "RW-45", "QUALITY", "SECURITY-AUDIT-REPORT.md");
@@ -164,20 +163,24 @@ describe("TASK-956: Комплексный аудит безопасности, 
     );
   });
 
-  it("SUB-956-3 (Шаг 3.1 & 3.2): генерирует валидный SBOM SPDX 2.3 (rust/dist/sbom.spdx.json) и проверяет лицензии всех 85+ зависимостей", async () => {
+  it("SUB-956-3 (Шаг 3.1 & 3.2): генерирует валидный SBOM SPDX 2.3 (rust/dist/sbom.spdx.json) и проверяет лицензии всех 85+ зависимостей", async (t) => {
     const { verifySbomSpdx23Manifest } = await import("../../scripts/secret-scan.mjs");
 
-    // 1. Шаг 3.1: Запуск node scripts/sbom.mjs --check --output rust/dist/sbom.spdx.json
+    const outputDir = mkdtempSync(join(tmpdir(), "sbom-audit-956-"));
+    t.after(() => rmSync(outputDir, { recursive: true, force: true }));
+    const sbomPath = join(outputDir, "sbom.spdx.json");
+
+    // Write the generated workspace SBOM away from the published artifact.
     const sbomRun = spawnSync(
       process.execPath,
-      [SBOM_SCRIPT, "--check", "--output", SBOM_PATH],
+      [SBOM_SCRIPT, "--check", "--output", sbomPath],
       { cwd: ROOT, encoding: "utf8" },
     );
     assert.equal(sbomRun.status, 0, `Ошибка генерации SBOM: ${sbomRun.stderr}`);
-    assert.ok(existsSync(SBOM_PATH), "Манифест rust/dist/sbom.spdx.json должен существовать");
+    assert.ok(existsSync(sbomPath), "Сгенерированный манифест SBOM должен существовать");
 
     // 2. Шаг 3.2: Валидация структуры SPDX 2.3 и лицензий всех 85+ зависимостей (фактически 98 пакетов)
-    const sbomAudit = verifySbomSpdx23Manifest(SBOM_PATH);
+    const sbomAudit = verifySbomSpdx23Manifest(sbomPath);
     assert.equal(sbomAudit.passed, true, `Невалидный SBOM: ${sbomAudit.reasons.join("; ")}`);
     assert.equal(sbomAudit.spdxVersion, "SPDX-2.3");
     assert.equal(sbomAudit.dataLicense, "CC0-1.0");
@@ -195,7 +198,7 @@ describe("TASK-956: Комплексный аудит безопасности, 
     const tmp = mkdtempSync(join(tmpdir(), "sbom-neg-956-"));
     try {
       const badSbomPath = join(tmp, "bad-sbom.spdx.json");
-      const validDoc = JSON.parse(readFileSync(SBOM_PATH, "utf8"));
+      const validDoc = JSON.parse(readFileSync(sbomPath, "utf8"));
       const mutatedDoc = {
         ...validDoc,
         packages: [

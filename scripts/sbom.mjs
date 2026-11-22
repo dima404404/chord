@@ -14,58 +14,8 @@ const allowlist = new Set([
 ]);
 const exceptions = new Set(['LLVM-exception']);
 
-/**
- * Exact licenses for platform crates that are in Cargo.lock but are not extracted
- * into the local registry cache on this host. Versions are pinned by Cargo.lock.
- * @type {Map<string,string>}
- */
-const knownLicenses = new Map([
-  ['r-efi@6.0.0', 'MIT OR Apache-2.0 OR LGPL-2.1-or-later'],
-  ['wasi@0.11.1+wasi-snapshot-preview1', 'Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT'],
-  ['windows-link@0.2.1', 'MIT OR Apache-2.0'],
-  ['windows-sys@0.52.0', 'MIT OR Apache-2.0'],
-  ['windows-sys@0.61.2', 'MIT OR Apache-2.0'],
-  ['windows-targets@0.52.6', 'MIT OR Apache-2.0'],
-  ['windows_aarch64_gnullvm@0.52.6', 'MIT OR Apache-2.0'],
-  ['windows_aarch64_msvc@0.52.6', 'MIT OR Apache-2.0'],
-  ['windows_i686_gnu@0.52.6', 'MIT OR Apache-2.0'],
-  ['windows_i686_gnullvm@0.52.6', 'MIT OR Apache-2.0'],
-  ['windows_i686_msvc@0.52.6', 'MIT OR Apache-2.0'],
-  ['windows_x86_64_gnu@0.52.6', 'MIT OR Apache-2.0'],
-  ['windows_x86_64_gnullvm@0.52.6', 'MIT OR Apache-2.0'],
-  ['windows_x86_64_msvc@0.52.6', 'MIT OR Apache-2.0'],
-]);
-
 /** @typedef {{name:string,version:string,source?:string,dependencies:string[]}} LockPackage */
 /** @typedef {{id:string,name:string,version:string,license?:string,source?:string}} MetaPackage */
-
-/** @param {string} text */
-function hostTarget(text) {
-  const match = text.match(/^host:\s*(\S+)$/m);
-  if (!match?.[1]) throw new Error('rustc -vV: не найден host target');
-  return match[1];
-}
-
-/** Host triple without requiring a child rustc in restricted sandboxes.
- * @returns {string} */
-function detectTarget() {
-  if (process.env.SBOM_TARGET) return process.env.SBOM_TARGET;
-  try {
-    const output = execFileSync('rustc', ['-vV'], { encoding: 'utf8' });
-    if (typeof output !== 'string') throw new Error('rustc -vV: пустой вывод');
-    return hostTarget(output);
-  } catch {
-    /** @type {Record<string, Record<string, string>>} */
-    const fallback = {
-      linux: { x64: 'x86_64-unknown-linux-gnu', arm64: 'aarch64-unknown-linux-gnu' },
-      darwin: { x64: 'x86_64-apple-darwin', arm64: 'aarch64-apple-darwin' },
-      win32: { x64: 'x86_64-pc-windows-msvc', arm64: 'aarch64-pc-windows-msvc' },
-    };
-    const target = fallback[process.platform]?.[process.arch];
-    if (!target) throw new Error(`не удалось определить host target: ${process.platform}/${process.arch}`);
-    return target;
-  }
-}
 
 /**
  * Parse the package records we need from Cargo.lock without a TOML dependency.
@@ -91,10 +41,9 @@ function parseLock(text) {
 
 /** @returns {{packages: MetaPackage[], workspace: string[]}} */
 function loadMetadata() {
-  const target = detectTarget();
-  /** @type {string[]} */
+  // Cargo.lock includes optional and platform-specific dependencies.
   const args = [
-    'metadata', '--offline', '--format-version', '1', '--filter-platform', target,
+    'metadata', '--locked', '--offline', '--all-features', '--format-version', '1',
     '--manifest-path', join(root, 'rust', 'Cargo.toml'),
   ];
   /** @type {string} */
@@ -252,7 +201,7 @@ function buildDocument(lockText, lockPackages, metadata) {
     .map((pkg) => {
       const key = `${pkg.name}@${pkg.version}`;
       const meta = metadataByKey.get(key);
-      const license = normalizeLicense(meta?.license || knownLicenses.get(key) || 'NOASSERTION');
+      const license = normalizeLicense(meta?.license || 'NOASSERTION');
       return {
         name: pkg.name,
         SPDXID: spdxId(pkg.name, pkg.version),

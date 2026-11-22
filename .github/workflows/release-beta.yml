@@ -70,12 +70,15 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Fetch locked workspace sources for SBOM
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
+
       - name: Security Secret Scan & SBOM SPDX 2.3 Verification
         run: |
           set -euo pipefail
           mkdir -p .gate
-          node scripts/secret-scan.mjs --json .gate/secret-scan.json
-          node scripts/sbom.mjs --check --output rust/dist/sbom.spdx.json
+          node scripts/sbom.mjs --check --output .gate/workspace-sbom.spdx.json
+          node scripts/secret-scan.mjs --sbom .gate/workspace-sbom.spdx.json --out-json .gate/secret-scan.json
 
       - name: Verify Release Notes, Beta Testing Guide & Base SHA256SUMS
         run: |

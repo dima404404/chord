@@ -283,7 +283,8 @@ async function main() {
       const matches = await searchKnownFailure(combinedOutput.slice(-500), 1, 0.6);
       if (matches.length > 0) {
         const top = matches[0];
-        console.log(`   💡 Found Known Solution (Confidence: ${(top.score * 100).toFixed(1)}%):`);
+        const match = top.exactMatch ? 'Exact pattern match' : `Similarity: ${(top.score * 100).toFixed(1)}%`;
+        console.log(`   💡 Found Known Solution (${match}):`);
         console.log(`      Pattern:  ${top.errorPattern}`);
         console.log(`      Cause:    ${top.rootCause}`);
         console.log(`      Fix:      ${top.solution}`);

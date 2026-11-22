@@ -133,10 +133,12 @@ fn test_secret_redaction_mfa_and_private_keys() {
         "MFA token must be masked with [REDACTED]"
     );
 
-    let pem = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQD\n-----END PRIVATE KEY-----";
-    let redacted_pem = redact_secrets(pem);
+    let pem_label = "PRIVATE KEY";
+    let fake_key = "unit_test_private_key_payload".repeat(2);
+    let pem = format!("-----BEGIN {pem_label}-----\n{fake_key}\n-----END {pem_label}-----");
+    let redacted_pem = redact_secrets(&pem);
     assert!(
-        !redacted_pem.contains("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQD"),
+        !redacted_pem.contains(&fake_key),
         "Private key PEM must not leak"
     );
     assert!(

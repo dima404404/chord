@@ -226,6 +226,11 @@ else
     echo "ci: display: активный DISPLAY отсутствует, используется xvfb-run -a (при наличии)"
 fi
 
+# The offline SBOM check needs the locked sources for every platform.
+if [[ "${#OFFLINE[@]}" == 0 ]]; then
+    cargo_run fetch --locked --manifest-path "$RUST_DIR/Cargo.toml"
+fi
+
 # 1. Форматирование
 run cargo fmt --manifest-path "$RUST_DIR/Cargo.toml" --all -- --check
 

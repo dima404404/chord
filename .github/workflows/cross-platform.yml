@@ -117,6 +117,9 @@ jobs:
       - name: Core lint
         if: ${{ !cancelled() && matrix.suite == 'core' }}
         run: cargo clippy --locked --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+      - name: Fetch locked workspace sources for SBOM
+        if: ${{ !cancelled() && matrix.suite == 'core' }}
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
       - name: Core tests
         if: ${{ !cancelled() && matrix.suite == 'core' }}
         run: cargo test --locked --workspace --manifest-path rust/Cargo.toml

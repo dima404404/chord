@@ -497,10 +497,24 @@ describe("test-impact v2: точечный граф Rust BFF", () => {
     assert.ok(mods.length >= 10, `в lib.rs найдено мало модулей: ${mods.join(", ")}`);
     // Исключения — по именам реальных файлов tests/*.rs, а не по выдуманной схеме.
     /** @type {Record<string, string>} */
-    const CONTRACT_NAME = { core_bridge: "core_bridge", settings_store: "settings_contract" };
+    const CONTRACT_NAME = {
+      bindings: "specta_contract",
+      core_bridge: "core_bridge",
+      dave_bridge: "dave_voice_bridge_contract",
+      db_bridge: "db_bridge_contract",
+      dto: "specta_contract",
+      onboarding: "bff_domains_router_contract",
+      permissions: "data_contract",
+      soundboard: "bff_domains_router_contract",
+      stage_instances: "bff_domains_router_contract",
+      voice_diagnostics: "voice_stream_codes_contract",
+      settings_store: "settings_contract",
+    };
     for (const mod of mods) {
       const target = CONTRACT_NAME[mod] ?? `${mod}_contract`;
       const plan = planFor([`rust/gui-spike/src/${mod}.rs`]);
+      assert.ok(existsSync(join(root, "rust/gui-spike/tests", `${target}.rs`)),
+        `Missing integration test for pub mod ${mod}`);
       assert.ok(
         has(plan, `--test ${target}`),
         `lib.rs: pub mod ${mod} без таргета --test ${target}: ${plan.commands.join(" | ")}`,

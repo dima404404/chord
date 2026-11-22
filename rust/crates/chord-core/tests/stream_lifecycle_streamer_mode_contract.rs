@@ -782,8 +782,10 @@ fn dim5_and_dim9_empty_state_selective_config_ready_reset_and_telemetry() {
         .unwrap();
 
     // Perform content and notification suppressions to exercise telemetry counters
-    let sample = "Token Bearer fake_jwt_payload_header_abc123.mock_sig_part.dummy_tail_token_xyz987 invite https://discord.gg/abc123 mail user@domain.com";
-    let cleaned = controller.sanitize_display_text(sample);
+    let fake_token = "synthetic_fixture_".repeat(4);
+    let sample =
+        format!("Token Bearer {fake_token} invite https://discord.gg/abc123 mail user@domain.com");
+    let cleaned = controller.sanitize_display_text(&sample);
     assert!(!cleaned.contains("abc123"));
     assert!(!cleaned.contains("user@domain.com"));
     let _ = controller.evaluate_notification("ch-1", "ping");

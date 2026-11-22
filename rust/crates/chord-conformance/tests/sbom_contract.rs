@@ -122,7 +122,17 @@ fn generates_spdx_23_with_locked_packages_and_licenses() {
 
 #[test]
 fn checks_allowlist_and_rejects_forbidden_license() {
-    let allowed = run_node(&["scripts/sbom.mjs", "--check"]);
+    let output_path = std::env::temp_dir().join(format!(
+        "discord-lab-sbom-allowlist-{}.json",
+        std::process::id()
+    ));
+    let allowed = run_node(&[
+        "scripts/sbom.mjs",
+        "--check",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
+    let _ = std::fs::remove_file(output_path);
     assert!(
         allowed.status.success(),
         "stderr={}",

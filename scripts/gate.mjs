@@ -586,7 +586,7 @@ function harnessBuildPhase() {
   return {
     name: "harness-build",
     command: "cargo",
-    args: ["build", "--manifest-path", "tests/e2e/harness/Cargo.toml"],
+    args: ["build", "--locked", "--manifest-path", "tests/e2e/harness/Cargo.toml"],
     timeoutMs: 300000,
     preflight: () => (existsSync(manifestPath)
       ? ["манифест: tests/e2e/harness/Cargo.toml"]

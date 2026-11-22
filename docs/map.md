@@ -87,8 +87,28 @@ flowchart TB
       pl3["Portable Mode & Windows / macOS Adapters (R6-03, R6-04)"]:::ok
       pl4["Steam Deck & Gamepad Controller Mode (R6-01)"]:::ok
     end
+
+    subgraph S6["6. Reference Implementations"]
+      ref1["Vesktop — Screen sharing and packaging"]:::neu
+      ref2["discord-qt — Protocol contracts and schemas"]:::neu
+    end
+    bkl["Transfer Backlog"]:::neu
+
+    subgraph S8["8. Rust Client (docs/rust-client/)"]
+      rc1["CONCEPT.md — Desktop client goals"]:::neu
+      rc2["FEATURES.md — Feature catalog"]:::neu
+      rc3["ARCHITECTURE.md — Tauri and Rust workspace"]:::neu
+      rc4["PLAN.md — Implementation waves"]:::neu
+      rc5["TEST-PLAN.md — Quality tiers"]:::neu
+      rc6["PROJECT-STRUCTURE.md — Workspace crates"]:::neu
+      rc7["TRACEABILITY.md — Feature to test mapping"]:::neu
+      rc8["VERIFICATION.md — Evidence validation"]:::neu
+    end
   end
 
+  ref1 --> bkl
+  ref2 --> bkl
+  bkl --> S8
   AMCP --> LAYERS
 ```
 

@@ -96,31 +96,8 @@ export function gatherProjectMetrics() {
   };
 }
 
-export function generateMapMarkdown(metrics) {
-  return `# Master Project Knowledge Graph & Component Map
-
-> **Automated Codebase Knowledge Graph** (\`scripts/sync-project-map.mjs\`).  
-> Active Branch: \`${metrics.branch}\` | HEAD: \`${metrics.headCommit}\` | Roadmap Progress: **${metrics.progressPercent}%** (${metrics.completedSlots}/${metrics.totalSlots} cards completed) | Tests: **${metrics.testFiles}+** | Worker RAM: \`${metrics.workerRam} / 25.00 GiB\`.
-
----
-
-## 1. Quality & Architectural Budget Summary
-
-| Metric | Current Value | Target Threshold | Status |
-|---|---|---|---|
-| **Roadmap Wave Slots** | ${metrics.totalSlots} total | 44 slots | 🔄 In Progress (${metrics.progressPercent}%) |
-| **Completed & Verified** | **${metrics.completedSlots}** tasks | 100% | ✅ Green |
-| **Pending Tasks** | **${metrics.remainingSlots}** tasks | 0 | 🟡 P0: 5, P1: 1, P2: 5, P3: 0 |
-| **Contract & Unit Test Suites** | **${metrics.testFiles}+** files | 100% pass, 0 flaky | ✅ Full Coverage (371+ suites) |
-| **Thin Bridge Architectural Budget** | **≤ 600 LOC** (avg 291 LOC) | ≤ 800 LOC hard ceiling | ✅ 8/8 Bridges Compliant |
-| **Worker Process RAM (OOM Guard)** | **${metrics.workerRam}** | ≤ 25.00 GiB ceiling | ✅ Safe (< 10 GiB) |
-| **Zero-Token Automation** | Git-Sync, Auto-Driver, TDD-Plan, Bridges | 100% Script-driven | ✅ >18,500 Tokens Saved |
-
----
-
-## 2. System Architecture Layers (Mermaid Knowledge Graph)
-
-\`\`\`mermaid
+export function generateArchitectureMermaid() {
+  return `\`\`\`mermaid
 flowchart TB
   classDef ok fill:#e2f6e7,stroke:#2f9e5f,color:#1b2430
   classDef part fill:#fdf3d8,stroke:#c99700,color:#1b2430
@@ -186,10 +163,58 @@ flowchart TB
       pl3["Portable Mode & Windows / macOS Adapters (R6-03, R6-04)"]:::ok
       pl4["Steam Deck & Gamepad Controller Mode (R6-01)"]:::ok
     end
+
+    subgraph S6["6. Reference Implementations"]
+      ref1["Vesktop — Screen sharing and packaging"]:::neu
+      ref2["discord-qt — Protocol contracts and schemas"]:::neu
+    end
+    bkl["Transfer Backlog"]:::neu
+
+    subgraph S8["8. Rust Client (docs/rust-client/)"]
+      rc1["CONCEPT.md — Desktop client goals"]:::neu
+      rc2["FEATURES.md — Feature catalog"]:::neu
+      rc3["ARCHITECTURE.md — Tauri and Rust workspace"]:::neu
+      rc4["PLAN.md — Implementation waves"]:::neu
+      rc5["TEST-PLAN.md — Quality tiers"]:::neu
+      rc6["PROJECT-STRUCTURE.md — Workspace crates"]:::neu
+      rc7["TRACEABILITY.md — Feature to test mapping"]:::neu
+      rc8["VERIFICATION.md — Evidence validation"]:::neu
+    end
   end
 
+  ref1 --> bkl
+  ref2 --> bkl
+  bkl --> S8
   AMCP --> LAYERS
-\`\`\`
+\`\`\``;
+}
+
+export function generateMapMarkdown(metrics) {
+  return `# Master Project Knowledge Graph & Component Map
+
+> **Automated Codebase Knowledge Graph** (\`scripts/sync-project-map.mjs\`).
+>
+> Active Branch: \`${metrics.branch}\` | HEAD: \`${metrics.headCommit}\` | Roadmap Progress: **${metrics.progressPercent}%** (${metrics.completedSlots}/${metrics.totalSlots} cards completed) | Tests: **${metrics.testFiles}+** | Worker RAM: \`${metrics.workerRam} / 25.00 GiB\`.
+
+---
+
+## 1. Quality & Architectural Budget Summary
+
+| Metric | Current Value | Target Threshold | Status |
+|---|---|---|---|
+| **Roadmap Wave Slots** | ${metrics.totalSlots} total | 44 slots | 🔄 In Progress (${metrics.progressPercent}%) |
+| **Completed & Verified** | **${metrics.completedSlots}** tasks | 100% | ✅ Green |
+| **Pending Tasks** | **${metrics.remainingSlots}** tasks | 0 | 🟡 P0: 5, P1: 1, P2: 5, P3: 0 |
+| **Contract & Unit Test Suites** | **${metrics.testFiles}+** files | 100% pass, 0 flaky | ✅ Full Coverage (371+ suites) |
+| **Thin Bridge Architectural Budget** | **≤ 600 LOC** (avg 291 LOC) | ≤ 800 LOC hard ceiling | ✅ 8/8 Bridges Compliant |
+| **Worker Process RAM (OOM Guard)** | **${metrics.workerRam}** | ≤ 25.00 GiB ceiling | ✅ Safe (< 10 GiB) |
+| **Zero-Token Automation** | Git-Sync, Auto-Driver, TDD-Plan, Bridges | 100% Script-driven | ✅ >18,500 Tokens Saved |
+
+---
+
+## 2. System Architecture Layers (Mermaid Knowledge Graph)
+
+${generateArchitectureMermaid()}
 
 ---
 

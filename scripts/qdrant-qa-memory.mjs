@@ -156,36 +156,43 @@ export async function indexFailurePattern({
   }
 }
 
+async function queryFailurePoints(body) {
+  const endpoint = QDRANT_URL + '/collections/' + COLLECTION_NAME + '/points/query';
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, with_payload: true }),
+    signal: AbortSignal.timeout(4000),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.result?.points ?? [];
+}
+
 /**
- * Search Qdrant for known failure resolutions
+ * Search Qdrant for known failure resolutions.
  */
 export async function searchKnownFailure(queryText, limit = 3, scoreThreshold = 0.65) {
   try {
     const vector = await getEmbedding(queryText);
-    const res = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        vector,
+    let hits = await queryFailurePoints({ query: vector, limit, score_threshold: scoreThreshold });
+    const exactMatch = hits.length === 0;
+    if (exactMatch) {
+      // Exact matches still work with offline embeddings or a different embedding model.
+      hits = await queryFailurePoints({
         limit,
-        with_payload: true,
-        score_threshold: scoreThreshold,
-      }),
-      signal: AbortSignal.timeout(4000),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      return (data.result || []).map((hit) => ({
-        score: hit.score,
-        testFile: hit.payload?.testFile,
-        errorPattern: hit.payload?.errorPattern,
-        rootCause: hit.payload?.rootCause,
-        solution: hit.payload?.solution,
-        tags: hit.payload?.tags || [],
-      }));
+        filter: { must: [{ key: 'errorPattern', match: { value: queryText } }] },
+      });
     }
-    return [];
+    return hits.map((hit) => ({
+      score: hit.score,
+      exactMatch,
+      testFile: hit.payload?.testFile,
+      errorPattern: hit.payload?.errorPattern,
+      rootCause: hit.payload?.rootCause,
+      solution: hit.payload?.solution,
+      tags: hit.payload?.tags || [],
+    }));
   } catch {
     return [];
   }
@@ -302,7 +309,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log('   ℹ️ No direct match found in Qdrant memory.');
     } else {
       hits.forEach((hit, i) => {
-        console.log(`\n[Match #${i + 1}] (Cosine Similarity: ${(hit.score * 100).toFixed(1)}%)`);
+        const match = hit.exactMatch ? 'Exact pattern match' : `Similarity: ${(hit.score * 100).toFixed(1)}%`;
+        console.log(`\n[Match #${i + 1}] (${match})`);
         console.log(`   📁 Target File: ${hit.testFile}`);
         console.log(`   ⚠️ Pattern:     ${hit.errorPattern}`);
         console.log(`   💡 Root Cause:  ${hit.rootCause}`);

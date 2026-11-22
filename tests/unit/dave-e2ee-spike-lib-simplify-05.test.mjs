@@ -246,8 +246,8 @@ describe("LIB-SIMPLIFY-05: Comparative Spike Prototype (libdave C++ FFI vs Serei
           id: "MUT-DAVE-05",
           file: "src/davey_crypto.rs",
           description: "Bypass constant-time confirmation_tag verification in Commit",
-          target: "bool::from(expected_tag.ct_eq(received_tag))",
-          replacement: "true || bool::from(expected_tag.ct_eq(received_tag))",
+          target: "bool::from(expected_tag.as_slice().ct_eq(received_tag))",
+          replacement: "true || bool::from(expected_tag.as_slice().ct_eq(received_tag))",
         },
       ];
 
