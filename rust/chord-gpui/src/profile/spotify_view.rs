@@ -4,7 +4,7 @@
 #[cfg(target_os = "linux")]
 use std::time::Instant;
 
-use gpui::*;
+use gpui::{prelude::FluentBuilder, *};
 use gpui_kit::component::StyledExt;
 
 use crate::{

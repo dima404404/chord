@@ -8,7 +8,6 @@ use chord_core::rest::{
     transport::{HttpClientConfig, HttpRequest, send_with},
 };
 use gpui::*;
-use gpui_kit::component::StyledExt;
 
 use crate::theme::DISCORD_THEME;
 
@@ -72,7 +71,7 @@ async fn fetch_artwork(path: String) -> Result<Arc<Image>, String> {
         )
         .await
         .map_err(|_| "Spotify artwork request timed out".to_owned())?
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("Spotify artwork transport failed: {error:?}"))
     })?;
     if response.status != 200 {
         return Err(format!("Spotify artwork HTTP {}", response.status));
