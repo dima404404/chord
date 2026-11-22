@@ -805,7 +805,7 @@ fn dim5_and_dim9_empty_state_selective_config_ready_reset_and_telemetry() {
     let mut custom_cfg = controller.config().clone();
     custom_cfg.hide_instant_invites = false;
     controller.set_config(custom_cfg);
-    let selective = sanitize_stream_content(sample, controller.config(), true);
+    let selective = sanitize_stream_content(&sample, controller.config(), true);
     assert!(
         selective
             .sanitized_text
