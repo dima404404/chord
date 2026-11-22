@@ -115,6 +115,23 @@ test('a truncated ELF fails validation instead of becoming a release', linux, t 
   assert.doesNotMatch(result.stderr, /ModuleNotFoundError|SyntaxError/);
 });
 
+test('RELRO cannot protect unmapped pages on a 4 KiB ARM kernel', linux, () => {
+  // The first writable LOAD ends before the mapped page following the RELRO boundary.
+  const layout = [
+    [1, 6, 0, 0x25c5710, 0, 0x16c1c0, 0x16c1c0, 16384],
+    [1, 6, 0, 0x27358d0, 0, 0x20, 0x20, 16384],
+    [0x6474e552, 4, 0, 0x25c5710, 0, 0x16c1c0, 0x16e8f0, 1],
+  ];
+  const code = 'import json; from verify import validate_relro_mapping; validate_relro_mapping(json.loads(sys.argv[1]))';
+  const broken = oracle(code, [JSON.stringify(layout)]);
+  assert.notEqual(broken.status, 0);
+  assert.match(broken.stderr, /GNU_RELRO includes unmapped 4 KiB pages/);
+
+  layout[0][6] = 0x16e8f0;
+  const padded = oracle(code, [JSON.stringify(layout)]);
+  assert.equal(padded.status, 0, padded.stderr);
+});
+
 test('a changed local runtime cannot satisfy the official content pin', linux, t => {
   const path = join(fixture(t), 'corrupt runtime');
   writeFileSync(path, 'deliberate corruption, never a package fixture');

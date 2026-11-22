@@ -114,10 +114,15 @@ jobs:
       - name: Build and inspect the real profile packages
         id: packages
         run: |
+          # Re-link the workspace app when reusing dependency objects from a previous linker.
+          cargo clean --release --package chord-gpui --target aarch64-unknown-linux-gnu \
+            --manifest-path rust/chord-gpui/Cargo.toml --target-dir "$CARGO_TARGET_DIR"
           bash scripts/build-arm64.sh --output "$ARM_QA_OUTPUT" \
             --version "$CHORD_GPUI_TEST_VERSION" --profile "$ARM_QA_PROFILE" \
             --report-json "$ARM_QA_OUTPUT/build-report.json"
           bash scripts/build-arm64.sh --verify --output "$ARM_QA_OUTPUT" --version "$CHORD_GPUI_TEST_VERSION"
+          python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p["linker_version"].startswith("LLD 23."); assert not p["cargo_reported_artifact"]["fresh"]' "$ARM_QA_OUTPUT/arm64-build-provenance.json"
+          readelf --string-dump=.comment "$ARM_QA_OUTPUT/discord-gpui-aarch64" | grep -F 'Linker: LLD 23.'
           cp "$CHORD_ARM64_RUNTIME_FILE" "$ARM_QA_OUTPUT/runtime-aarch64"
           { uname -a; getconf PAGESIZE; rustc --version --verbose; node --version; python3 --version; clang --version; df -h .; } > "$ARM_QA_OUTPUT/native-host.txt"
           dpkg-query -W > "$ARM_QA_OUTPUT/environment-packages.txt"
@@ -128,6 +133,12 @@ jobs:
         run: |
           node scripts/verify-system-requirements.mjs --binary "$ARM_QA_OUTPUT/discord-gpui-aarch64" \
             --out-json "$ARM_QA_OUTPUT/native-headless-system-report.json"
+          APPIMAGE_EXTRACT_AND_RUN=1 node --input-type=module - "$ARM_QA_OUTPUT/discord-gpui-v$CHORD_GPUI_TEST_VERSION-aarch64.AppImage" <<'JS'
+          import { runLlvmPipeSmokeVerification } from "./scripts/verify-system-requirements.mjs";
+          const smoke = runLlvmPipeSmokeVerification(process.argv[2]);
+          console.log(JSON.stringify(smoke));
+          if (!smoke.passed) process.exitCode = 1;
+          JS
 
       - name: Preserve builder file modes for verification
         if: always() && steps.packages.outcome == 'success'
