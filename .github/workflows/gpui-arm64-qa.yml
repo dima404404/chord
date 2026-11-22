@@ -46,7 +46,7 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential clang libclang-dev lld llvm pkg-config git ca-certificates \
-            curl gh binutils tar gzip squashfs-tools dpkg-dev util-linux xz-utils python3.11 \
+            curl gh binutils file tar gzip squashfs-tools dpkg-dev util-linux xz-utils python3.11 \
             libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev \
             libxcb1-dev libx11-xcb-dev libwebkit2gtk-4.1-dev libsecret-1-dev \
             libpipewire-0.3-dev libenchant-2-dev libhunspell-dev libssl-dev libzstd-dev
@@ -67,12 +67,6 @@ jobs:
         with:
           toolchain: '1.100.0'
           targets: aarch64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: gpui-arm64-jammy-${{ matrix.profile }}
-          workspaces: rust/chord-gpui -> ../../target/gpui-arm64-qa
-          cache-on-failure: true
-
       - name: Verify native host and exact GPUI source
         run: |
           test "$(uname -m)" = aarch64
@@ -94,6 +88,12 @@ jobs:
           printf 'CHORD_ARM64_RUNTIME_FILE=%s\n' "$RUNNER_TEMP/arm64-official-tools/runtime-aarch64" >> "$GITHUB_ENV"
           printf 'CHORD_ARM64_APPIMAGETOOL=%s\n' "$RUNNER_TEMP/arm64-official-tools/appimagetool-aarch64.AppImage" >> "$GITHUB_ENV"
           printf 'CHORD_ARM64_SBOM_FILE=%s\n' "$RUNNER_TEMP/gpui-arm64.spdx.json" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gpui-arm64-jammy-tools-v2-${{ matrix.profile }}
+          workspaces: rust/chord-gpui -> ../../target/gpui-arm64-qa
+          cache-on-failure: true
 
       - name: Acquire and verify the exact official AppImage assets
         env:

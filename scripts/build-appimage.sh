@@ -163,7 +163,7 @@ if [[ ! -f "$APPRUN_SRC" || ! -f "$DESKTOP_SRC" || ! -f "$ICON_SVG_SRC" ]]; then
   exit 2
 fi
 
-for tool in python3 ldd readelf sha256sum unsquashfs; do
+for tool in python3 ldd readelf file sha256sum unsquashfs; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "build-appimage: обязательная системная утилита не найдена: $tool" >&2
     exit 2
