@@ -586,20 +586,33 @@ export function createAuthGate(options = {}) {
   };
   mfaForm.addEventListener("submit", submitMfa); mfaSubmit.addEventListener("click", submitMfa); captchaContinue.addEventListener("click", () => { if (phase === "validating") return; if (!captchaKey) { if (isLiveInteractiveSession()) { const w = /** @type {any} */ (globalThis); if (w.hcaptcha || w.turnstile) { setError("Поставьте галочку «Я человек» и завершите проверку в окне капчи выше."); if (w.__discordLastHCaptchaWidgetId !== undefined && typeof w.hcaptcha?.execute === "function") { try { w.hcaptcha.execute(w.__discordLastHCaptchaWidgetId); } catch (_) { /* ignore */ } } return; } setError("Интерактивный виджет капчи недоступен в окне Linux WebKit. Используйте вход по токену ниже."); setState("no-session"); tokenBlock.open = true; token.focus(); } return; } const solvedKey = captchaKey; captchaKey = ""; const pwd = passValue; setState("validating"); const args = /** @type {Record<string, unknown>} */ ({ login: loginValue, password: pwd, captcha_key: solvedKey, captcha_rqtoken: captchaRqtoken }); if (captchaSessionId) args.captcha_session_id = captchaSessionId; if (captchaRqdata) args.captcha_rqdata = captchaRqdata; void invoke(AUTH_COMMANDS.password, args).then((r) => { if (!r || r.kind !== "captcha") passValue = ""; result(r); }).catch((e) => { passValue = ""; fail(e); }); }); resend.addEventListener("click", () => { void invoke(AUTH_COMMANDS.sms, { ticket }).then((r) => { subtitle.textContent = r.phone ?? r.phoneMasked ?? "Код отправлен"; }).catch(fail); });
   hide(form, true); hide(qr, true); hide(captcha, true); hide(mfa, true); setState("checking");
+  let initialCheck = Promise.resolve();
   if (/** @type {any} */ (globalThis).__SPIKE_AUTH_DISABLED__) {
     ready({ username: "Offline Developer", global_name: "Developer" });
-  } else void invoke(AUTH_COMMANDS.status).then((s) => {
-    stored = Boolean(s?.stored);
-    if (s?.status === "ready" && s.user) ready(s.user);
-    else if (s?.status === "error") fail(s.error);
-    else if (stored && isLiveInteractiveSession()) {
-      if ((/** @type {any} */ (globalThis)).__SPIKE_SNAPSHOT_DONE__) {
-        restore.click();
+  } else {
+    initialCheck = invoke(AUTH_COMMANDS.status).then((s) => {
+      stored = Boolean(s?.stored);
+      if (s?.status === "ready" && s.user) ready(s.user);
+      else if (s?.status === "error") fail(s.error);
+      else if (stored && isLiveInteractiveSession()) {
+        if ((/** @type {any} */ (globalThis)).__SPIKE_SNAPSHOT_DONE__) {
+          restore.click();
+        } else {
+          setTimeout(() => restore.click(), 60);
+        }
       } else {
-        setTimeout(() => restore.click(), 60);
+        setError("");
+        setState("no-session");
+        login.focus();
       }
-    }
-    else { setError(""); setState("no-session"); login.focus(); }
-  }).catch(fail);
-  return { get state() { return phase; }, get user() { return user; }, submit: passwordSubmit, restore: () => restore.click(), logout: () => logout.click() };
+    }).catch(fail);
+  }
+  return {
+    initialCheck,
+    get state() { return phase; },
+    get user() { return user; },
+    submit: passwordSubmit,
+    restore: () => restore.click(),
+    logout: () => logout.click(),
+  };
 }

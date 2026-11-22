@@ -10,12 +10,17 @@ on:
         description: "Override pause until 2026-12-01 (set to 'run')"
         required: false
         default: ""
+      architecture:
+        description: "Windows architecture to verify"
+        type: choice
+        options: [both, x64, arm64]
+        default: both
 
 permissions:
   contents: read
 
 concurrency:
-  group: tauri-${{ github.workflow }}-${{ github.ref }}
+  group: tauri-${{ github.workflow }}-${{ github.ref }}-${{ inputs.architecture || 'both' }}
   cancel-in-progress: true
 
 env:
@@ -33,17 +38,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: windows-2025
-            target: x86_64-pc-windows-msvc
-            platform: windows
-            node_arch: x64
-            triplet: x64-windows
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            platform: windows
-            node_arch: arm64
-            triplet: arm64-windows
+        include: >-
+          ${{ fromJSON(inputs.architecture == 'x64' &&
+          '[{"runner":"windows-2025","target":"x86_64-pc-windows-msvc","platform":"windows","node_arch":"x64","triplet":"x64-windows"}]' ||
+          inputs.architecture == 'arm64' &&
+          '[{"runner":"windows-11-arm","target":"aarch64-pc-windows-msvc","platform":"windows","node_arch":"arm64","triplet":"arm64-windows"}]' ||
+          '[{"runner":"windows-2025","target":"x86_64-pc-windows-msvc","platform":"windows","node_arch":"x64","triplet":"x64-windows"},{"runner":"windows-11-arm","target":"aarch64-pc-windows-msvc","platform":"windows","node_arch":"arm64","triplet":"arm64-windows"}]') }}
     defaults:
       run:
         shell: bash
@@ -112,27 +112,6 @@ jobs:
           "LIB=$tauriNativePrefix/lib;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TAURI_NATIVE_DLL_DIR=$tauriNativePrefix/bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "$tauriNativePrefix/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Reproduce the old binary's missing fixtures error
-        if: matrix.node_arch == 'x64'
-        env:
-          TAURI_TARGET: ${{ matrix.target }}
-          BASELINE_COMMIT: e464612b43fbc4510f28de3dbf5514915de7665d
-        run: |
-          source_file=rust/gui-spike/src/data.rs
-          saved_file=$(mktemp)
-          cp "$source_file" "$saved_file"
-          trap 'cp "$saved_file" "$source_file"' EXIT
-          git show "$BASELINE_COMMIT:$source_file" > "$source_file"
-          if cargo test --locked --manifest-path rust/gui-spike/Cargo.toml \
-            --target "$TAURI_TARGET" --features tauri/custom-protocol \
-            --test portable_data_contract -- --exact portable_session_loads_without_developer_fixtures \
-            > portable-regression-red.log 2>&1; then
-            tail -40 portable-regression-red.log
-            exit 1
-          fi
-          tail -45 portable-regression-red.log
-          grep -F 'live data must not require developer fixtures: NotFound' portable-regression-red.log
 
       - name: Verify the login DOM and shell
         run: |

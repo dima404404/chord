@@ -7645,7 +7645,7 @@ async function reportUiSnapshot() {
     /** @type {any} */ (globalThis).__SPIKE_SNAPSHOT_DONE__ = true;
     return;
   }
-  const { router, chat, members, emoji, settings, search } = app;
+  const { router, chat, members, emoji, settings, search, auth } = app;
 
   const actions = { screenClicks: 0, categoryClicks: false, toggleClick: false, listScroll: false };
   let chatRenderedRows = 0;
@@ -7691,6 +7691,7 @@ async function reportUiSnapshot() {
     /** @type {any} */ (globalThis).__SPIKE_SNAPSHOT_DONE__ = true;
   }
 
+  await auth.initialCheck;
   const snapshot = {
     screenCount: document.querySelectorAll(".screen").length,
     chatRows: CHAT_ROWS,
@@ -7712,6 +7713,14 @@ async function reportUiSnapshot() {
     toolbarItems: chat.toolbar?.itemCount ?? 0,
     // L-02-UI: наблюдаемость live-канала без payload/секретов (PLAN §6).
     dispatch: app?.dispatch?.stats ?? { source: "absent" },
+    authentication: {
+      state: auth.state,
+      gateVisible: byId("auth-gate")?.getAttribute("hidden") === null,
+      formVisible: byId("auth-form")?.getAttribute("hidden") === null,
+      activeFixture: (/** @type {any} */ (globalThis).__SPIKE_AUTH_DISABLED__) === true,
+      qrCode: byId("auth-qr-code") !== null,
+      qrNotice: byId("auth-qr-unavailable")?.textContent?.trim() ?? "",
+    },
   };
   try {
     await tauri.core.invoke("report_ui_snapshot", { payload: JSON.stringify(snapshot) });

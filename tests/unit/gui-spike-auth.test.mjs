@@ -419,6 +419,14 @@ describe("auth-гейт: раскладка окна входа (LOGIN-SPEC §1,
       qr.click();
       assert.equal(env.appModule?.currentApp?.()?.qrAuthModal.getState().state, "closed");
       assert.deepEqual(env.invokeCalls.filter(({ cmd }) => cmd.startsWith("remote_auth_")), []);
+      assert.deepEqual(env.snapshot.payload?.authentication, {
+        state: "no-session",
+        gateVisible: true,
+        formVisible: true,
+        activeFixture: false,
+        qrCode: false,
+        qrNotice: "Вход по QR-коду пока недоступен в Chord.",
+      });
 
       const passkey = byId(env, "auth-passkey-disabled");
       assert.equal(passkey.getAttribute("aria-disabled"), "true");
