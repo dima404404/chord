@@ -1347,9 +1347,9 @@ pub fn send_desktop_notification(
     category: Option<&str>,
 ) -> Result<u32, String> {
     let raw = std::env::var("DBUS_SESSION_BUS_ADDRESS")
-        .map_err(|_| "Переменная окружения DBUS_SESSION_BUS_ADDRESS не задана".to_string())?;
+        .map_err(|_| "Адрес сессии D-Bus недоступен в DBUS_SESSION_BUS_ADDRESS".to_string())?;
     let address = chord_platform::dbus::BusAddress::parse(&raw)
-        .ok_or_else(|| format!("Не удалось распарсить DBUS_SESSION_BUS_ADDRESS: {raw}"))?;
+        .ok_or_else(|| "Некорректный адрес сессии D-Bus в DBUS_SESSION_BUS_ADDRESS".to_string())?;
     let mut notifier = chord_platform::notifications::Notifier::connect(&address)
         .map_err(|e| format!("D-Bus Notifier connect error: {e:?}"))?;
     let mut hints = chord_platform::notifications::Hints::default();

@@ -142,7 +142,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if (-not $env:VCPKG_INSTALLATION_ROOT) { throw 'The native vcpkg installation is required' }
           $triplet = $env:TAURI_VCPKG_TRIPLET
-          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install "sqlite3:$triplet" "hunspell:$triplet"
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install "sqlite3:$triplet" "hunspell:$triplet" "openssl:$triplet"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tauriNativePrefix = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed/$triplet"
           "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

@@ -27,6 +27,7 @@ zeroize = { version = "1.8.2", features = ["derive"] }
 [build-dependencies]
 cc = "1.2.67"
 pkg-config = "0.3.32"
+vcpkg = "0.2.15"
 
 [lints.rust]
 unsafe_code = "deny"

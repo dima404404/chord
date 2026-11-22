@@ -7726,8 +7726,17 @@ fn read_json(path: &Path) -> Result<Value, DataError> {
 /// поэтому `null` означает испорченный файл). Иначе `Parse` с путём и индексом:
 /// кадр без типа иначе молча терялся бы и давал ложный `NotFound`/пустую страницу.
 fn read_frames(root: &Path) -> Result<Vec<Frame>, DataError> {
-    let dir = root.join("gateway").join("by-type");
-    let entries = fs::read_dir(&dir).map_err(|error| map_io(&dir, &error))?;
+    let gateway = root.join("gateway");
+    let dir = gateway.join("by-type");
+    let entries = fs::read_dir(&dir).map_err(|error| {
+        // Windows may report a missing child when its parent is a file.
+        if error.kind() == io::ErrorKind::NotFound
+            && fs::metadata(&gateway).is_ok_and(|metadata| !metadata.is_dir())
+        {
+            return map_io(&gateway, &io::Error::from(io::ErrorKind::NotADirectory));
+        }
+        map_io(&dir, &error)
+    })?;
     let mut paths: Vec<PathBuf> = entries
         .filter_map(|entry| match entry {
             Ok(entry) => Some(entry.path()),
