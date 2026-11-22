@@ -46,10 +46,14 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential clang libclang-dev lld llvm pkg-config git ca-certificates \
-            curl gh binutils tar gzip squashfs-tools dpkg-dev util-linux xz-utils \
+            curl gh binutils tar gzip squashfs-tools dpkg-dev util-linux xz-utils python3.11 \
             libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev \
             libxcb1-dev libx11-xcb-dev libwebkit2gtk-4.1-dev libsecret-1-dev \
             libpipewire-0.3-dev libenchant-2-dev libhunspell-dev libssl-dev libzstd-dev
+          # Runner tool caches are populated on Noble and may require newer GLIBC.
+          mkdir -p "$RUNNER_TEMP/jammy-python"
+          ln -s /usr/bin/python3.11 "$RUNNER_TEMP/jammy-python/python3"
+          printf '%s\n' "$RUNNER_TEMP/jammy-python" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v7
         with:
@@ -58,10 +62,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24.22.3'
-          architecture: arm64
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
           architecture: arm64
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -78,7 +78,7 @@ jobs:
           test "$(uname -m)" = aarch64
           test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.35'
           node -e 'if (process.arch !== "arm64") throw new Error("Native ARM64 Node is required")'
-          python3 -c 'import sys,tomllib,hashlib; assert sys.version_info >= (3,11)'
+          python3 -c 'import sys,tomllib,hashlib; assert sys.version_info >= (3,11) and callable(hashlib.file_digest)'
           node scripts/bootstrap-gpui.mjs
           node scripts/bootstrap-gpui.mjs --check
           if [ "$ARM_QA_PROFILE" = generic ]; then
