@@ -21,11 +21,11 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiTestDist as DIST_DIR, gpuiTestLicense, gpuiTestPackaging, gpuiTestTarball, gpuiTestVersion } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const SNAP_DIR = join(ROOT, "packaging", "snap");
+const SNAP_DIR = join(gpuiTestPackaging, "snap");
 const MANIFEST_PATH = join(SNAP_DIR, "snapcraft.yaml");
-const DIST_DIR = join(ROOT, "rust", "dist");
 const SHA256SUMS_PATH = join(DIST_DIR, "SHA256SUMS");
 
 /** Максимальная длина поля summary по спецификации Snapcraft. */
@@ -297,8 +297,8 @@ export function validateSnapcraftManifest(manifest, oracleSums) {
     errors.push("Поле description должно содержать подробное описание пакета (не менее 20 символов)");
   }
 
-  if (manifest.license !== "MIT OR Apache-2.0") {
-    errors.push(`Ожидалась лицензия SPDX "MIT OR Apache-2.0", получено: "${String(manifest.license)}"`);
+  if (manifest.license !== gpuiTestLicense) {
+    errors.push(`Ожидалась лицензия SPDX "${gpuiTestLicense}", получено: "${String(manifest.license)}"`);
   }
 
   if (manifest.compression !== "lzo" && manifest.compression !== "xz") {
@@ -445,11 +445,11 @@ describe("TASK-967: Спецификация пакета Snap packaging/snap/sn
 
     assert.equal(manifest.name, "discord-gpui");
     assert.equal(manifest.base, "core22");
-    assert.equal(manifest.version, "1.0.0-beta.1");
+    assert.equal(manifest.version, gpuiTestVersion);
     assert.equal(manifest.grade, "stable");
     assert.equal(manifest.confinement, "strict");
     assert.equal(manifest.compression, "lzo");
-    assert.equal(manifest.license, "MIT OR Apache-2.0");
+    assert.equal(manifest.license, gpuiTestLicense);
     assert.ok(
       manifest.summary.length <= MAX_SUMMARY_LENGTH,
       `Поле summary не должно превышать ${MAX_SUMMARY_LENGTH} символов`,
@@ -569,7 +569,7 @@ describe("TASK-967: Спецификация пакета Snap packaging/snap/sn
     }
 
     assert.ok(
-      checkedFiles.includes("discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz"),
+      checkedFiles.includes(gpuiTestTarball),
       "Секция parts должна включать релизный архив discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz",
     );
     assert.ok(

@@ -20,9 +20,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="1.0.0-beta.1"
 BINARY="$ROOT/rust/dist/discord-gpui"
+SBOM="$ROOT/rust/dist/sbom.spdx.json"
 OUTPUT=""
 REPORT_JSON=""
 APPDIR_OUT=""
+APPIMAGETOOL="${CHORD_APPIMAGE_TOOL:-}"
+RUNTIME_FILE="${CHORD_APPIMAGE_RUNTIME:-}"
 MAX_RSS_MB="60"
 DRY_RUN=0
 SKIP_SMOKE=0
@@ -32,10 +35,13 @@ usage() {
 Использование: scripts/build-appimage.sh [ОПЦИИ]
 
 Опции:
+  --sbom PATH          Путь к SBOM входной сборки (по умолчанию rust/dist/sbom.spdx.json)
   --binary PATH        Путь к входному ELF-бинарнику (по умолчанию rust/dist/discord-gpui)
   --output PATH        Путь к выходному файлу .AppImage или директории (по умолчанию rust/dist/discord-gpui-v<VERSION>-x86_64.AppImage)
   --version SEMVER     Версия пакета в формате SemVer (по умолчанию 1.0.0-beta.1)
   --report-json PATH   Записать JSON-отчёт о сборке, зависимостях и замере VmRSS
+  --appimagetool PATH  Путь к официальному appimagetool из packaging/arm64/toolchain-pins.json
+  --runtime-file PATH Путь к официальному Type 2 x86_64 runtime из того же манифеста
   --appdir-out DIR     Сохранить сформированное дерево AppDir по указанному пути
   --max-rss-mb NUM     Максимально допустимый объём памяти VmRSS в МБ при smoke-тесте (по умолчанию 60)
   --skip-smoke         Пропустить финальную проверку --headless-smoke внутри AppImage
@@ -51,6 +57,11 @@ while [[ "$#" -gt 0 ]]; do
       BINARY="$2"
       shift 2
       ;;
+    --sbom)
+      [[ "$#" -ge 2 ]] && [[ "$2" != --* ]] || { echo "build-appimage: опция --sbom требует путь" >&2; exit 1; }
+      SBOM="$2"
+      shift 2
+      ;;
     --output|--out-dir)
       [[ "$#" -ge 2 ]] || { echo "build-appimage: опция $1 требует путь" >&2; exit 1; }
       OUTPUT="$2"
@@ -64,6 +75,15 @@ while [[ "$#" -gt 0 ]]; do
     --report-json)
       [[ "$#" -ge 2 ]] || { echo "build-appimage: опция --report-json требует путь к файлу" >&2; exit 1; }
       REPORT_JSON="$2"
+      shift 2
+      ;;
+    --appimagetool|--runtime-file)
+      [[ "$#" -ge 2 ]] || { echo "build-appimage: опция $1 требует путь" >&2; exit 1; }
+      if [[ "$1" == "--appimagetool" ]]; then
+        APPIMAGETOOL="$2"
+      else
+        RUNTIME_FILE="$2"
+      fi
       shift 2
       ;;
     --appdir-out)
@@ -143,7 +163,7 @@ if [[ ! -f "$APPRUN_SRC" || ! -f "$DESKTOP_SRC" || ! -f "$ICON_SVG_SRC" ]]; then
   exit 2
 fi
 
-for tool in python3 cc ldd tar gzip sha256sum; do
+for tool in python3 ldd sha256sum unsquashfs; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "build-appimage: обязательная системная утилита не найдена: $tool" >&2
     exit 2
@@ -167,6 +187,26 @@ PY
 then
   exit 1
 fi
+
+# Verify the official tool and runtime before executing either of them.
+if [[ ! -x "$APPIMAGETOOL" || ! -f "$RUNTIME_FILE" ]]; then
+  echo "build-appimage: supply --appimagetool and --runtime-file from packaging/arm64/toolchain-pins.json" >&2
+  exit 2
+fi
+python3 - "$ROOT/packaging/arm64/toolchain-pins.json" "$APPIMAGETOOL" "$RUNTIME_FILE" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+pins = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+for name, pin in zip(sys.argv[2:], (pins["appimagetool"]["assets"]["x86_64"], pins["runtime_x86_64"])):
+    path = Path(name)
+    if path.stat().st_size != pin["size"] or hashlib.sha256(path.read_bytes()).hexdigest() != pin["sha256"]:
+        sys.exit(f"build-appimage: official file SHA-256/size mismatch: {path}")
+PY
+APPIMAGETOOL="$(realpath -- "$APPIMAGETOOL")"
+RUNTIME_FILE="$(realpath -- "$RUNTIME_FILE")"
 
 # Валидация desktop-файла через desktop-file-validate (если установлен)
 if command -v desktop-file-validate >/dev/null 2>&1; then
@@ -203,13 +243,13 @@ if [[ -f "$ICON_PNG_SRC" ]]; then
 fi
 
 # 2. Копирование лицензионных файлов и SBOM
-for doc_file in LICENSE-MIT LICENSE-APACHE README.md; do
+for doc_file in LICENSE LICENSE-MIT LICENSE-APACHE README.md; do
   if [[ -f "$ROOT/$doc_file" ]]; then
     install -m 0644 "$ROOT/$doc_file" "$APPDIR/usr/share/doc/discord-gpui/$doc_file"
   fi
 done
-if [[ -f "$ROOT/rust/dist/sbom.spdx.json" ]]; then
-  install -m 0644 "$ROOT/rust/dist/sbom.spdx.json" "$APPDIR/usr/share/doc/discord-gpui/sbom.spdx.json"
+if [[ -f "$SBOM" ]]; then
+  install -m 0644 "$SBOM" "$APPDIR/usr/share/doc/discord-gpui/sbom.spdx.json"
 fi
 
 # 3. Инспекция ldd и бандлинг разделяемых библиотек в AppDir/usr/lib/
@@ -309,283 +349,21 @@ if [[ -n "$APPDIR_OUT" ]]; then
   cp -a "$APPDIR" "$APPDIR_OUT"
 fi
 
-# 4. Упаковка AppDir в детерминированный архив payload.tar.gz
-PAYLOAD_TAR_GZ="$WORK_TMP/payload.tar.gz"
-tar -C "$APPDIR" --owner=0 --group=0 --numeric-owner -czf "$PAYLOAD_TAR_GZ" .
-
-# 5. Компиляция нативного ELF64 рантайма Type 2 AppImage
-RUNTIME_C="$WORK_TMP/appimage_runtime.c"
-RUNTIME_BIN="$WORK_TMP/appimage_runtime"
+# Build with the upstream Type 2 runtime and a real SquashFS filesystem.
+CANDIDATE_APPIMAGE="$WORK_TMP/$(basename -- "$OUTPUT_FILE")"
 UPDATE_INFO="gh-releases-zsync|discord-lab|discord-gpui|latest-pre|discord-gpui-*-x86_64.AppImage.zsync"
-
-cat > "$RUNTIME_C" <<'EOF'
-#define _GNU_SOURCE
-#include <errno.h>
-#include <fcntl.h>
-#include <inttypes.h>
-#include <limits.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#pragma pack(push, 1)
-typedef struct {
-    char magic[12];       /* "AI2PAYLOAD\0\0" */
-    uint64_t offset;      /* Смещение начала архива AppDir (кратно 4096) */
-    uint64_t size;        /* Размер архива AppDir в байтах */
-    char hash_prefix[36]; /* Первые 32 hex-символа SHA-256 архива + NUL */
-} ai2_trailer_t;
-#pragma pack(pop)
-
-static int read_trailer(const char *self_path, ai2_trailer_t *out) {
-    int fd = open(self_path, O_RDONLY);
-    if (fd < 0) return -1;
-    off_t end_pos = lseek(fd, 0, SEEK_END);
-    if (end_pos < (off_t)sizeof(ai2_trailer_t)) {
-        close(fd);
-        return -1;
-    }
-    if (lseek(fd, end_pos - (off_t)sizeof(ai2_trailer_t), SEEK_SET) < 0) {
-        close(fd);
-        return -1;
-    }
-    ssize_t n = read(fd, out, sizeof(ai2_trailer_t));
-    close(fd);
-    if (n != (ssize_t)sizeof(ai2_trailer_t)) return -1;
-    if (memcmp(out->magic, "AI2PAYLOAD\0\0", 12) != 0) return -1;
-    out->hash_prefix[35] = '\0';
-    return 0;
-}
-
-static int extract_payload_to(const char *self_path, const ai2_trailer_t *tr, const char *dest_dir) {
-    if (mkdir(dest_dir, 0755) != 0 && errno != EEXIST) {
-        return -1;
-    }
-    int fd = open(self_path, O_RDONLY);
-    if (fd < 0) return -1;
-    if (lseek(fd, (off_t)tr->offset, SEEK_SET) < 0) {
-        close(fd);
-        return -1;
-    }
-
-    int pipefd[2];
-    if (pipe(pipefd) != 0) {
-        close(fd);
-        return -1;
-    }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(pipefd[0]);
-        close(pipefd[1]);
-        close(fd);
-        return -1;
-    }
-
-    if (pid == 0) {
-        close(fd);
-        close(pipefd[1]);
-        if (dup2(pipefd[0], STDIN_FILENO) < 0) _exit(127);
-        close(pipefd[0]);
-        execlp("tar", "tar", "-xzf", "-", "-C", dest_dir, (char *)NULL);
-        _exit(127);
-    }
-
-    close(pipefd[0]);
-    uint64_t remaining = tr->size;
-    char buf[65536];
-    int write_err = 0;
-    while (remaining > 0) {
-        size_t chunk = remaining > sizeof(buf) ? sizeof(buf) : (size_t)remaining;
-        ssize_t r = read(fd, buf, chunk);
-        if (r <= 0) {
-            write_err = 1;
-            break;
-        }
-        ssize_t off = 0;
-        while (off < r) {
-            ssize_t w = write(pipefd[1], buf + off, (size_t)(r - off));
-            if (w <= 0) {
-                write_err = 1;
-                break;
-            }
-            off += w;
-        }
-        if (write_err) break;
-        remaining -= (uint64_t)r;
-    }
-    close(pipefd[1]);
-    close(fd);
-
-    int status = 0;
-    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || write_err) {
-        return -1;
-    }
-    return 0;
-}
-
-int main(int argc, char **argv) {
-    char self_path[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
-    if (len <= 0) {
-        fprintf(stderr, "AppImage runtime: не удалось прочитать /proc/self/exe\n");
-        return 2;
-    }
-    self_path[len] = '\0';
-
-    ai2_trailer_t tr;
-    if (read_trailer(self_path, &tr) != 0) {
-        fprintf(stderr, "AppImage runtime: повреждён или отсутствует дескриптор AI2PAYLOAD\n");
-        return 2;
-    }
-
-    int arg_shift = 0;
-    if (argc >= 2) {
-        if (strcmp(argv[1], "--appimage-offset") == 0) {
-            printf("%" PRIu64 "\n", tr.offset);
-            return 0;
-        }
-        if (strcmp(argv[1], "--appimage-version") == 0) {
-            printf("AppImage runtime Type 2 (x86_64) discord-gpui\n");
-            return 0;
-        }
-        if (strcmp(argv[1], "--appimage-updateinformation") == 0) {
-            printf("%s\n", APPIMAGE_UPDATE_INFO);
-            return 0;
-        }
-        if (strcmp(argv[1], "--appimage-help") == 0) {
-            printf("Опции AppImage Type 2:\n"
-                   "  --appimage-extract              Распаковать содержимое в ./squashfs-root\n"
-                   "  --appimage-extract-and-run      Распаковать во временный каталог и запустить AppRun\n"
-                   "  --appimage-offset               Вывести байтовое смещение встроенного образа\n"
-                   "  --appimage-updateinformation    Вывести строку метаданных обновления\n"
-                   "  --appimage-version              Вывести версию рантайма AppImage\n");
-            return 0;
-        }
-        if (strcmp(argv[1], "--appimage-extract") == 0) {
-            if (extract_payload_to(self_path, &tr, "squashfs-root") != 0) {
-                fprintf(stderr, "AppImage runtime: ошибка распаковки в squashfs-root\n");
-                return 1;
-            }
-            return 0;
-        }
-        if (strcmp(argv[1], "--appimage-extract-and-run") == 0) {
-            arg_shift = 1;
-        }
-    }
-
-    const char *tmp_base = getenv("TMPDIR");
-    if (!tmp_base || !tmp_base[0]) tmp_base = "/tmp";
-
-    char cache_dir[PATH_MAX];
-    char ready_file[PATH_MAX + 64];
-    snprintf(cache_dir, sizeof(cache_dir), "%s/appimage_extracted_discord_gpui_%s", tmp_base, tr.hash_prefix);
-    snprintf(ready_file, sizeof(ready_file), "%s/.appdir_ready", cache_dir);
-
-    struct stat st;
-    if (stat(ready_file, &st) != 0) {
-        char stage_dir[PATH_MAX + 64];
-        snprintf(stage_dir, sizeof(stage_dir), "%s.stage.%d", cache_dir, (int)getpid());
-        if (extract_payload_to(self_path, &tr, stage_dir) != 0) {
-            fprintf(stderr, "AppImage runtime: не удалось распаковать рабочий образ AppDir\n");
-            return 2;
-        }
-        char stage_ready[PATH_MAX + 128];
-        snprintf(stage_ready, sizeof(stage_ready), "%s/.appdir_ready", stage_dir);
-        int rfd = open(stage_ready, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (rfd >= 0) close(rfd);
-
-        if (rename(stage_dir, cache_dir) != 0) {
-            /* Если параллельный процесс уже создал cache_dir, используем его */
-            if (stat(ready_file, &st) != 0) {
-                fprintf(stderr, "AppImage runtime: не удалось активировать каталог AppDir\n");
-                return 2;
-            }
-        }
-    }
-
-    char cwd[PATH_MAX];
-    if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        setenv("OWD", cwd, 1);
-    }
-    setenv("APPIMAGE", self_path, 1);
-    setenv("APPDIR", cache_dir, 1);
-
-    char apprun_path[PATH_MAX + 64];
-    snprintf(apprun_path, sizeof(apprun_path), "%s/AppRun", cache_dir);
-
-    int forward_argc = argc - arg_shift;
-    char **forward_argv = calloc((size_t)forward_argc + 1, sizeof(char *));
-    if (!forward_argv) return 2;
-    forward_argv[0] = apprun_path;
-    for (int i = 1; i < forward_argc; i++) {
-        forward_argv[i] = argv[i + arg_shift];
-    }
-    forward_argv[forward_argc] = NULL;
-
-    execv(apprun_path, forward_argv);
-    fprintf(stderr, "AppImage runtime: не удалось запустить %s: %s\n", apprun_path, strerror(errno));
-    return 2;
-}
-EOF
-
-cc -O2 -Wall -Wextra -DAPPIMAGE_UPDATE_INFO="\"$UPDATE_INFO\"" "$RUNTIME_C" -o "$RUNTIME_BIN"
-strip "$RUNTIME_BIN" 2>/dev/null || true
-
-# 6. Сборка финального файла .AppImage с магическими байтами Type 2 (AI\x02 на смещении 8..11)
-mkdir -p "$(dirname "$OUTPUT_FILE")"
-CANDIDATE_APPIMAGE="$WORK_TMP/candidate.AppImage"
-
-python3 - "$RUNTIME_BIN" "$PAYLOAD_TAR_GZ" "$CANDIDATE_APPIMAGE" <<'PY'
-import hashlib
-import os
-import struct
-import sys
-
-runtime_path, payload_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
-
-with open(runtime_path, "rb") as f:
-    runtime_bytes = bytearray(f.read())
-
-# Проставляем сигнатуру Type 2 AppImage 'AI\x02' в байты 8..11 заголовка ELF64 (EI_PAD)
-runtime_bytes[8:11] = b"AI\x02"
-
-# Выравниваем смещение начала архива по границе 4096 байт
-aligned_offset = ((len(runtime_bytes) + 4095) // 4096) * 4096
-padding_len = aligned_offset - len(runtime_bytes)
-
-with open(payload_path, "rb") as f:
-    payload_bytes = f.read()
-
-payload_hash = hashlib.sha256(payload_bytes).hexdigest()[:32].encode("ascii")
-hash_field = payload_hash.ljust(36, b"\x00")
-trailer = struct.pack("<12sQQ36s", b"AI2PAYLOAD\x00\x00", aligned_offset, len(payload_bytes), hash_field)
-
-with open(out_path, "wb") as f:
-    f.write(runtime_bytes)
-    if padding_len > 0:
-        f.write(b"\x00" * padding_len)
-    f.write(payload_bytes)
-    f.write(trailer)
-
-os.chmod(out_path, 0o755)
-PY
-
-install -m 0755 "$CANDIDATE_APPIMAGE" "$OUTPUT_FILE"
 (
-  cd "$(dirname "$OUTPUT_FILE")"
-  sha256sum "$(basename "$OUTPUT_FILE")" > "$(basename "$OUTPUT_FILE").sha256"
+  cd "$WORK_TMP"
+  APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "$APPIMAGETOOL" \
+    --runtime-file "$RUNTIME_FILE" --updateinformation "$UPDATE_INFO" "$APPDIR" "$CANDIDATE_APPIMAGE"
 )
+OFFSET="$(env -u APPIMAGE_EXTRACT_AND_RUN "$CANDIDATE_APPIMAGE" --appimage-offset)"
+unsquashfs -s -o "$OFFSET" "$CANDIDATE_APPIMAGE" >/dev/null
 
-# 7. Верификация запуска --headless-smoke внутри собранного AppImage (VmRSS < MAX_RSS_MB)
+# Run the candidate without FUSE. Publish the local file after validation.
 SMOKE_STDOUT=""
 if [[ "$SKIP_SMOKE" -eq 0 ]]; then
-  SMOKE_STDOUT="$("$OUTPUT_FILE" --headless-smoke)"
+  SMOKE_STDOUT="$(APPIMAGE_EXTRACT_AND_RUN=1 "$CANDIDATE_APPIMAGE" --headless-smoke)"
   if ! grep -q "^GPUI_SMOKE_OK " <<<"$SMOKE_STDOUT"; then
     echo "build-appimage: в выводе --headless-smoke отсутствует маркер GPUI_SMOKE_OK" >&2
     exit 1
@@ -593,13 +371,13 @@ if [[ "$SKIP_SMOKE" -eq 0 ]]; then
 fi
 
 # 8. Проверка лимита памяти VmRSS и запись опционального JSON-отчёта
-python3 - "$OUTPUT_FILE" "$APPDIR/usr/lib/bundled-deps.json" "$MAX_RSS_MB" "$SMOKE_STDOUT" "$REPORT_JSON" "$VERSION" <<'PY'
+python3 - "$CANDIDATE_APPIMAGE" "$APPDIR/usr/lib/bundled-deps.json" "$MAX_RSS_MB" "$SMOKE_STDOUT" "$REPORT_JSON" "$VERSION" "$OUTPUT_FILE" "$OFFSET" <<'PY'
 import hashlib
 import json
 import os
 import sys
 
-appimage_path, deps_path, max_rss_str, smoke_stdout, report_json_path, version = sys.argv[1:7]
+appimage_path, deps_path, max_rss_str, smoke_stdout, report_json_path, version, output_path, offset = sys.argv[1:]
 max_rss_mb = float(max_rss_str)
 
 smoke_payload = None
@@ -632,7 +410,8 @@ report = {
     "task_id": "TASK-961",
     "status": "passed",
     "version": version,
-    "appimage_path": os.path.abspath(appimage_path),
+    "appimage_path": os.path.abspath(output_path),
+    "squashfs_offset": int(offset),
     "appimage_size_bytes": len(data),
     "appimage_sha256": sha256_hex,
     "elf_type2_magic_ok": data[:7] == b"\x7fELF\x02\x01\x01" and data[8:11] == b"AI\x02",
@@ -647,5 +426,15 @@ if report_json_path:
     with open(report_json_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 PY
+
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+install -m 0755 "$CANDIDATE_APPIMAGE" "$OUTPUT_FILE"
+if [[ -f "$CANDIDATE_APPIMAGE.zsync" ]]; then
+  install -m 0644 "$CANDIDATE_APPIMAGE.zsync" "$OUTPUT_FILE.zsync"
+fi
+(
+  cd "$(dirname "$OUTPUT_FILE")"
+  sha256sum "$(basename "$OUTPUT_FILE")" > "$(basename "$OUTPUT_FILE").sha256"
+)
 
 echo "build-appimage: успешно собран и верифицирован пакет $OUTPUT_FILE"

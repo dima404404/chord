@@ -27,19 +27,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiCandidate, gpuiTestArtifact, gpuiTestVersion } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const BUILD_SCRIPT = join(ROOT, "scripts", "build-appimage.sh");
 const APPRUN_PATH = join(ROOT, "packaging", "appimage", "AppRun");
 const DESKTOP_PATH = join(ROOT, "packaging", "appimage", "discord-gpui.desktop");
 const ICON_SVG_PATH = join(ROOT, "packaging", "appimage", "discord-gpui.svg");
-const DIST_BIN_PATH = join(ROOT, "rust", "dist", "discord-gpui");
-const DEFAULT_APPIMAGE_PATH = join(
-  ROOT,
-  "rust",
-  "dist",
-  "discord-gpui-v1.0.0-beta.1-x86_64.AppImage",
-);
+const APPIMAGE_NAME = `discord-gpui-v${gpuiTestVersion}-x86_64.AppImage`;
+const runtimeEnv = { ...process.env };
+delete runtimeEnv.APPIMAGE_EXTRACT_AND_RUN;
 
 /**
  * Вычисляет SHA-256 дайджест файла.
@@ -171,7 +168,7 @@ describe("TASK-961: Сборка автономного AppImage пакета и
 
       const probeRun = spawnSync(fakeAppRun, ["--no-sandbox", "--headless-smoke"], {
         env: {
-          ...process.env,
+          ...runtimeEnv,
           DISCORD_APPIMAGE_SOFTWARE_RENDER: "1",
         },
         encoding: "utf8",
@@ -204,10 +201,8 @@ describe("TASK-961: Сборка автономного AppImage пакета и
 
     const tmp = mkdtempSync(join(tmpdir(), "appimage-build-961-"));
     try {
-      const outAppImage = join(
-        tmp,
-        "discord-gpui-v1.0.0-beta.1-x86_64.AppImage",
-      );
+      const outAppImage = join(tmp, APPIMAGE_NAME);
+      const binary = gpuiTestArtifact("discord-gpui");
       const reportJsonPath = join(tmp, "appimage-report.json");
 
       // Сборка AppImage во временном каталоге с генерацией JSON-отчёта
@@ -215,6 +210,12 @@ describe("TASK-961: Сборка автономного AppImage пакета и
         "bash",
         [
           BUILD_SCRIPT,
+          "--binary",
+          binary,
+          "--sbom",
+          gpuiTestArtifact("sbom.spdx.json"),
+          "--version",
+          gpuiTestVersion,
           "--output",
           outAppImage,
           "--report-json",
@@ -255,19 +256,23 @@ describe("TASK-961: Сборка автономного AppImage пакета и
 
       // 3. Проверка сервисных флагов рантайма AppImage (--appimage-offset, --appimage-updateinformation)
       const offsetRes = spawnSync(outAppImage, ["--appimage-offset"], {
+        env: runtimeEnv,
         encoding: "utf8",
+        timeout: 30_000,
       });
       assert.equal(offsetRes.status, 0);
-      const offsetVal = Number.parseInt(offsetRes.stdout.trim(), 10);
-      assert.ok(
-        Number.isInteger(offsetVal) && offsetVal >= 4096 && offsetVal % 4096 === 0,
-        `Смещение архива AppImage (${offsetRes.stdout.trim()}) должно быть кратно 4096`,
-      );
+      const offsetVal = Number(offsetRes.stdout.trim());
+      assert.ok(Number.isSafeInteger(offsetVal) && offsetVal >= 64 && offsetVal < appImageStat.size);
+      assert.equal(readFileSync(outAppImage).subarray(offsetVal, offsetVal + 4).toString("ascii"), "hsqs");
+      const squashfs = spawnSync("unsquashfs", ["-s", "-o", String(offsetVal), outAppImage], {
+        encoding: "utf8",
+      });
+      assert.equal(squashfs.status, 0, squashfs.stderr);
 
       const updateInfoRes = spawnSync(
         outAppImage,
         ["--appimage-updateinformation"],
-        { encoding: "utf8" },
+        { env: runtimeEnv, encoding: "utf8", timeout: 30_000 },
       );
       assert.equal(updateInfoRes.status, 0);
       assert.match(
@@ -280,7 +285,9 @@ describe("TASK-961: Сборка автономного AppImage пакета и
       spawnSync("mkdir", ["-p", extractDir]);
       const extractRes = spawnSync(outAppImage, ["--appimage-extract"], {
         cwd: extractDir,
+        env: runtimeEnv,
         encoding: "utf8",
+        timeout: 30_000,
       });
       assert.equal(
         extractRes.status,
@@ -345,9 +352,15 @@ describe("TASK-961: Сборка автономного AppImage пакета и
       assert.ok(existsSync(extractedBin), "Должен присутствовать usr/bin/discord-gpui");
       assert.equal(
         sha256File(extractedBin),
-        sha256File(DIST_BIN_PATH),
+        sha256File(binary),
         "SHA-256 бинарника внутри AppImage должен побайтово совпадать с rust/dist/discord-gpui",
       );
+
+      if (gpuiCandidate) {
+        const docs = join(squashRoot, "usr", "share", "doc", "discord-gpui");
+        assert.equal(sha256File(join(docs, "LICENSE")), sha256File(join(ROOT, "LICENSE")));
+        assert.equal(sha256File(join(docs, "sbom.spdx.json")), sha256File(gpuiTestArtifact("sbom.spdx.json")));
+      }
 
       // 6. Проверка бандлинга зависимостей в usr/lib/ через независимый системный оракул ldd
       const bundledLibDir = join(squashRoot, "usr", "lib");
@@ -390,15 +403,17 @@ describe("TASK-961: Сборка автономного AppImage пакета и
   });
 
   it("SUB-961-3: выполняет --headless-smoke внутри релизного AppImage (VmRSS < 60 MB) и проверяет fallback/негативные режимы", () => {
+    const appImage = gpuiTestArtifact(APPIMAGE_NAME);
     assert.ok(
-      existsSync(DEFAULT_APPIMAGE_PATH),
-      `Релизный пакет AppImage должен существовать: ${DEFAULT_APPIMAGE_PATH}`,
+      existsSync(appImage),
+      `Релизный пакет AppImage должен существовать: ${appImage}`,
     );
 
     // 1. Прямой запуск собранного AppImage с флагом --headless-smoke
-    const smokeRun = spawnSync(DEFAULT_APPIMAGE_PATH, ["--headless-smoke"], {
+    const smokeRun = spawnSync(appImage, ["--headless-smoke"], {
       env: { ...process.env, WAYLAND_DISPLAY: "wayland-1", DISPLAY: ":0" },
       encoding: "utf8",
+      timeout: 30_000,
     });
     assert.equal(
       smokeRun.status,
@@ -425,11 +440,11 @@ describe("TASK-961: Сборка автономного AppImage пакета и
 
     // 2. Fallback-режим без FUSE: --appimage-extract-and-run --headless-smoke под софтверным рендером llvmpipe
     const extractAndRun = spawnSync(
-      DEFAULT_APPIMAGE_PATH,
+      appImage,
       ["--appimage-extract-and-run", "--headless-smoke"],
       {
         env: {
-          ...process.env,
+          ...runtimeEnv,
           DISCORD_APPIMAGE_SOFTWARE_RENDER: "1",
           WAYLAND_DISPLAY: "wayland-1",
           DISPLAY: ":0",
@@ -500,6 +515,10 @@ describe("TASK-961: Сборка автономного AppImage пакета и
         "bash",
         [
           BUILD_SCRIPT,
+          "--binary",
+          gpuiTestArtifact("discord-gpui"),
+          "--version",
+          gpuiTestVersion,
           "--output",
           join(tmp, "rss-fail.AppImage"),
           "--max-rss-mb",

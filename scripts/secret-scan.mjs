@@ -658,6 +658,7 @@ export function runFullSecurityAudit(options = {}) {
 function main(argv) {
   let dryRun = false;
   let sbomPath = join(ROOT, "rust", "dist", "sbom.spdx.json");
+  let binaryPath = join(ROOT, "rust", "dist", "discord-gpui");
   /** @type {string | null} */
   let outJson = null;
   /** @type {string | null} */
@@ -672,6 +673,11 @@ function main(argv) {
       const val = argv[i + 1];
       if (!val) throw new Error("--sbom требует путь");
       sbomPath = resolve(val);
+      i += 1;
+    } else if (arg === "--binary") {
+      const val = argv[i + 1];
+      if (!val || val.startsWith("--")) throw new Error("--binary требует путь");
+      binaryPath = resolve(val);
       i += 1;
     } else if (arg === "--out-json") {
       const val = argv[i + 1];
@@ -701,7 +707,7 @@ function main(argv) {
     return 2;
   }
 
-  const summary = runFullSecurityAudit({ rootDir: ROOT, sbomPath });
+  const summary = runFullSecurityAudit({ rootDir: ROOT, sbomPath, binaryPath });
   if (outJson) {
     mkdirSync(dirname(outJson), { recursive: true });
     writeFileSync(outJson, `${JSON.stringify(summary, null, 2)}\n`);

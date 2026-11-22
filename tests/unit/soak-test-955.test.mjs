@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiTestArtifact } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SCRIPT_PATH = join(ROOT, "scripts", "soak-test.mjs");
@@ -195,7 +196,7 @@ describe("TASK-955: Стресс-тест долговременной стаб�
 
       const run = spawnSync(
         process.execPath,
-        [SCRIPT_PATH, "--out-json", outJson, "--out-md", outMd],
+        [SCRIPT_PATH, "--binary", gpuiTestArtifact("discord-gpui"), "--out-json", outJson, "--out-md", outMd],
         { cwd: ROOT, encoding: "utf8" },
       );
       assert.equal(run.status, 0, `stderr: ${run.stderr}`);

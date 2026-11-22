@@ -113,3 +113,27 @@ within a finite budget after shutdown; persistent conflicts remain failures.
 Xvfb lifecycle checks derive the first free display from an independent
 read-only occupancy snapshot, so an outer test display does not invalidate
 the fixture. Real X11 sockets and locks are never modified by these checks.
+
+## CP-009 — Verify fresh GPUI packages using their own artifacts
+
+The legacy beta inventory contains digests for files absent from the checkout.
+Packaging tests can now consume a separately staged `x.y.z-qa.N` candidate built
+from a real release-profile GPUI executable. The candidate has its own version,
+SHA256SUMS, package manifests and SPDX document. The checked-in beta inventory
+and its artifact names remain the default historical input.
+
+The x86-64 builder uses the official hash-pinned AppImage runtime and
+appimagetool. A Type 2 header and a 4096-byte boundary previously accepted a gzip
+archive. Tests now inspect the runtime-reported offset, require SquashFS and
+verify the extracted program against the input digest. Headless startup and the
+60 MiB RSS budget still apply. Staged packages contain the project's GPL v3
+license text and retain the desktop and sandbox contract checks.
+
+Build `chord-gpui` with locked Cargo in release mode. Supply the x86-64 assets in
+`packaging/arm64/toolchain-pins.json` through `CHORD_APPIMAGE_TOOL` and
+`CHORD_APPIMAGE_RUNTIME`. Use Python 3.11+ with PyYAML to run
+`scripts/stage-gpui-test-dist.py --binary PATH --sbom PATH --version 1.0.0-qa.1 --output PATH`.
+The final argument must be a fresh directory. Set `CHORD_GPUI_TEST_DIST` to its
+`rust/dist` directory and `CHORD_GPUI_TEST_VERSION` to the same QA version for
+the package-contract tests. Run Arch's makepkg checks as an unprivileged Linux
+user. Set `APPIMAGE_EXTRACT_AND_RUN=1` for application startup in CI without FUSE.

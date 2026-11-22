@@ -19,11 +19,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiTestArtifact } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SECRET_SCAN_SCRIPT = join(ROOT, "scripts", "secret-scan.mjs");
 const SBOM_SCRIPT = join(ROOT, "scripts", "sbom.mjs");
-const DIST_BIN_PATH = join(ROOT, "rust", "dist", "discord-gpui");
 const REPORT_RW44_PATH = join(ROOT, "waves", "RW-44", "QUALITY", "SECURITY-AUDIT-REPORT.md");
 const REPORT_RW45_PATH = join(ROOT, "waves", "RW-45", "QUALITY", "SECURITY-AUDIT-REPORT.md");
 
@@ -70,7 +70,7 @@ describe("TASK-956: Комплексный аудит безопасности, 
     assert.equal(daveCheck.passed, true, `Нарушение DAVE MLS: ${daveCheck.reasons.join("; ")}`);
     assert.equal(daveCheck.leakedKeys.length, 0);
 
-    const binScan = scanBinaryArtifactForSecrets(DIST_BIN_PATH);
+    const binScan = scanBinaryArtifactForSecrets(gpuiTestArtifact("discord-gpui"));
     assert.equal(binScan.passed, true, `В бинарнике найдены секреты: ${JSON.stringify(binScan.findings)}`);
     assert.equal(binScan.findings.length, 0);
 
@@ -232,7 +232,7 @@ describe("TASK-956: Комплексный аудит безопасности, 
 
       const run = spawnSync(
         process.execPath,
-        [SECRET_SCAN_SCRIPT, "--check", "--out-json", outJson, "--out-md", outMd],
+        [SECRET_SCAN_SCRIPT, "--check", "--binary", gpuiTestArtifact("discord-gpui"), "--out-json", outJson, "--out-md", outMd],
         { cwd: ROOT, encoding: "utf8" },
       );
       assert.equal(run.status, 0, `stderr: ${run.stderr}`);

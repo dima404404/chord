@@ -23,12 +23,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiTestDist as DIST_DIR, gpuiTestTarball as TARBALL_NAME } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SCRIPT_PATH = join(ROOT, "scripts", "check-updates.mjs");
-const DIST_DIR = join(ROOT, "rust", "dist");
 const SHA256SUMS_PATH = join(DIST_DIR, "SHA256SUMS");
-const TARBALL_NAME = "discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz";
 
 describe("TASK-965: Стенд верификации авто-обновления через GitHub Releases API v3", () => {
   it("SUB-965-1: парсит и сравнивает версии по стандарту SemVer 2.0.0 (позитивные, негативные и граничные случаи)", async () => {

@@ -25,6 +25,7 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -36,10 +37,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiTestDist as DIST_DIR } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SCRIPT_PATH = join(ROOT, "scripts", "generate-delta.mjs");
-const DIST_DIR = join(ROOT, "rust", "dist");
 const SHA256SUMS_PATH = join(DIST_DIR, "SHA256SUMS");
 const GPUI_BIN_PATH = join(DIST_DIR, "discord-gpui");
 
@@ -560,7 +561,7 @@ describe("TASK-969: Генератор бинарных дельта-патче�
       const selfReportPath = join(tmp, "self-test-report.json");
       const selfRun = spawnSync(
         process.execPath,
-        [SCRIPT_PATH, "--self-test", "--out-json", selfReportPath],
+        [SCRIPT_PATH, "--self-test", "--dist-dir", DIST_DIR, "--out-json", selfReportPath],
         { cwd: ROOT, encoding: "utf8" },
       );
       assert.equal(selfRun.status, 0, `CLI --self-test завершился с ошибкой: ${selfRun.stderr}`);
@@ -570,6 +571,19 @@ describe("TASK-969: Генератор бинарных дельта-патче�
       assert.equal(report.status, "passed");
       assert.equal(report.hashRestored100Percent, true);
       assert.equal(report.rollbackVerified, true);
+
+      const badManifestDist = join(tmp, "bad-dist");
+      mkdirSync(badManifestDist);
+      writeFileSync(join(badManifestDist, "discord-gpui"), readFileSync(GPUI_BIN_PATH));
+      const wrongDigest = "0".repeat(64);
+      writeFileSync(join(badManifestDist, "SHA256SUMS"), wrongDigest + "  discord-gpui\n");
+      const badSelfRun = spawnSync(
+        process.execPath,
+        [SCRIPT_PATH, "--self-test", "--dist-dir", badManifestDist],
+        { cwd: ROOT, encoding: "utf8" },
+      );
+      assert.equal(badSelfRun.status, 2);
+      assert.match(badSelfRun.stderr, /discord-gpui does not match SHA256SUMS/);
 
       // 3. Полный цикл CLI: --generate -> --verify -> --apply
       const { v1Buf, v2Buf } = buildRealisticBinaryPair(65_536);

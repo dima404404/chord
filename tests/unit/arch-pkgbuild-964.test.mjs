@@ -24,12 +24,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiCandidate, gpuiTestDist as DIST_DIR, gpuiTestPackaging, gpuiTestTarball, gpuiTestVersion } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const ARCH_DIR = join(ROOT, "packaging", "arch");
+const ARCH_DIR = join(gpuiTestPackaging, "arch");
+const archVersion = gpuiTestVersion.replace("-", "_");
 const PKGBUILD_PATH = join(ARCH_DIR, "PKGBUILD");
 const SRCINFO_PATH = join(ARCH_DIR, ".SRCINFO");
-const DIST_DIR = join(ROOT, "rust", "dist");
 const SHA256SUMS_PATH = join(DIST_DIR, "SHA256SUMS");
 
 const REQUIRED_DEPENDS = [
@@ -109,20 +110,24 @@ describe("TASK-964: Спецификация пакета Arch Linux PKGBUILD и
     assert.ok(!srcinfo.includes("\r"), ".SRCINFO не должен содержать CRLF (\\r)");
 
     assert.match(pkgbuild, /^pkgname=discord-gpui$/m, "pkgname должен быть discord-gpui");
-    assert.match(pkgbuild, /^pkgver=1\.0\.0_beta\.1$/m, "pkgver должен быть 1.0.0_beta.1 (без дефисов по стандарту Arch)");
+    assert.ok(pkgbuild.split("\n").includes(`pkgver=${archVersion}`), "PKGBUILD must use the Arch package version");
     assert.match(pkgbuild, /^pkgrel=1$/m, "pkgrel должен быть 1");
     assert.match(pkgbuild, /^arch=\(['"]?x86_64['"]?\)/m, "arch должен содержать x86_64");
-    assert.match(pkgbuild, /license=\(.*MIT.*Apache-2\.0.*\)/s, "license должен указывать MIT и Apache-2.0");
+    if (gpuiCandidate) {
+      assert.match(pkgbuild, /^license=\('GPL-3\.0-only'\)$/m);
+    } else {
+      assert.match(pkgbuild, /license=\(.*MIT.*Apache-2\.0.*\)/s);
+    }
     assert.match(pkgbuild, /^check\(\)\s*\{/m, "PKGBUILD должен определять функцию check()");
     assert.match(pkgbuild, /^package\(\)\s*\{/m, "PKGBUILD должен определять функцию package()");
 
     const parsedSrc = parseSrcInfo(srcinfo);
     assert.deepEqual(parsedSrc.get("pkgbase"), ["discord-gpui"]);
     assert.deepEqual(parsedSrc.get("pkgname"), ["discord-gpui"]);
-    assert.deepEqual(parsedSrc.get("pkgver"), ["1.0.0_beta.1"]);
+    assert.deepEqual(parsedSrc.get("pkgver"), [archVersion]);
     assert.deepEqual(parsedSrc.get("pkgrel"), ["1"]);
     assert.deepEqual(parsedSrc.get("arch"), ["x86_64"]);
-    assert.deepEqual(parsedSrc.get("license"), ["MIT", "Apache-2.0"]);
+    assert.deepEqual(parsedSrc.get("license"), gpuiCandidate ? ["GPL-3.0-only"] : ["MIT", "Apache-2.0"]);
   });
 
   it("Шаг 2: PKGBUILD и .SRCINFO объявляют обязательные зависимости (pipewire, libsecret, wayland, vulkan-icd-loader)", () => {
@@ -169,7 +174,7 @@ describe("TASK-964: Спецификация пакета Arch Linux PKGBUILD и
     );
 
     const expectedArtifacts = [
-      "discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz",
+      gpuiTestTarball,
       "discord-gpui",
       "sbom.spdx.json",
     ];
@@ -241,9 +246,9 @@ describe("TASK-964: Спецификация пакета Arch Linux PKGBUILD и
         `${verifyOut.stdout}\n${verifyOut.stderr}`,
         /Validating source files with sha256sums\.\.\./,
       );
-      assert.match(
-        `${verifyOut.stdout}\n${verifyOut.stderr}`,
-        /discord-gpui-v1\.0\.0-beta\.1-linux-x86_64\.tar\.gz \.\.\. Passed/,
+      assert.ok(
+        (verifyOut.stdout + verifyOut.stderr).includes(`${gpuiTestTarball} ... Passed`),
+        verifyOut.stdout + verifyOut.stderr,
       );
     } finally {
       rmSync(tmpBuildDir, { recursive: true, force: true });
@@ -330,7 +335,7 @@ describe("TASK-964: Спецификация пакета Arch Linux PKGBUILD и
       spawnSync("mkdir", ["-p", srcdir, pkgdir]);
 
       // Распаковываем релизный архив и копируем sbom.spdx.json так же, как это делает makepkg
-      const tarPath = join(DIST_DIR, "discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz");
+      const tarPath = join(DIST_DIR, gpuiTestTarball);
       const extractOut = spawnSync("tar", ["-xzf", tarPath, "-C", srcdir], {
         encoding: "utf8",
       });
@@ -371,8 +376,7 @@ describe("TASK-964: Спецификация пакета Arch Linux PKGBUILD и
 
       // Проверяем установленные в $pkgdir файлы
       const installedBin = join(pkgdir, "usr", "bin", "discord-gpui");
-      const installedMit = join(pkgdir, "usr", "share", "licenses", "discord-gpui", "LICENSE-MIT");
-      const installedApache = join(pkgdir, "usr", "share", "licenses", "discord-gpui", "LICENSE-APACHE");
+      const licenseDir = join(pkgdir, "usr", "share", "licenses", "discord-gpui");
       const installedSbom = join(pkgdir, "usr", "share", "doc", "discord-gpui", "sbom.spdx.json");
       const installedDesktop = join(pkgdir, "usr", "share", "applications", "discord-gpui.desktop");
 
@@ -385,8 +389,12 @@ describe("TASK-964: Спецификация пакета Arch Linux PKGBUILD и
         "SHA-256 установленного бинарника должен совпадать с rust/dist/discord-gpui",
       );
 
-      assert.ok(existsSync(installedMit), "Файл лицензии LICENSE-MIT должен быть установлен");
-      assert.ok(existsSync(installedApache), "Файл лицензии LICENSE-APACHE должен быть установлен");
+      for (const license of gpuiCandidate ? ["LICENSE"] : ["LICENSE-MIT", "LICENSE-APACHE"]) {
+        assert.ok(existsSync(join(licenseDir, license)), "Missing installed license: " + license);
+      }
+      if (gpuiCandidate) {
+        assert.equal(sha256File(join(licenseDir, "LICENSE")), sha256File(join(ROOT, "LICENSE")));
+      }
       assert.ok(existsSync(installedSbom), "Файл SBOM sbom.spdx.json должен быть установлен");
       assert.equal(
         sha256File(installedSbom),

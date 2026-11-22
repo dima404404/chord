@@ -30,13 +30,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiTestDist as DIST_DIR, gpuiTestLicense, gpuiTestPackaging, gpuiTestTarball as TARBALL_NAME } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const SPEC_PATH = join(ROOT, "packaging", "rpm", "discord-gpui.spec");
-const DIST_DIR = join(ROOT, "rust", "dist");
+const SPEC_PATH = join(gpuiTestPackaging, "rpm", "discord-gpui.spec");
 const SHA256SUMS_PATH = join(DIST_DIR, "SHA256SUMS");
 const BIN_PATH = join(DIST_DIR, "discord-gpui");
-const TARBALL_NAME = "discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz";
 const TARBALL_PATH = join(DIST_DIR, TARBALL_NAME);
 
 const REQUIRED_RPM_DEPENDENCIES = [
@@ -201,8 +200,8 @@ function validateRpmSpecContract(specContent, oracle) {
   if (!tags.get("Release") || !/%\{\?dist\}/.test(tags.get("Release") ?? "")) {
     errors.push("Поле Release должно содержать макрос дистрибутива %{?dist}");
   }
-  if (tags.get("License") !== "MIT OR Apache-2.0") {
-    errors.push(`Ожидалась лицензия SPDX "MIT OR Apache-2.0", получено: ${tags.get("License") ?? "<missing>"}`);
+  if (tags.get("License") !== gpuiTestLicense) {
+    errors.push(`Ожидалась лицензия SPDX "${gpuiTestLicense}", получено: ${tags.get("License") ?? "<missing>"}`);
   }
   if (tags.get("ExclusiveArch") !== "x86_64") {
     errors.push(`Ожидался ExclusiveArch: x86_64, получено: ${tags.get("ExclusiveArch") ?? "<missing>"}`);

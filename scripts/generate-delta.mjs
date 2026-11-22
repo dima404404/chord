@@ -826,18 +826,23 @@ export function applyDeltaWithRollback(options) {
 /**
  * Выполняет встроенный сквозной самотест (`--self-test`) на базе реального артефакта `rust/dist/discord-gpui`.
  * @param {string} [outJsonPath]
+ * @param {string} [distDir]
  * @returns {Record<string, any>}
  */
-export function runSelfTest(outJsonPath) {
-  const gpuiBin = join(DEFAULT_DIST_DIR, "discord-gpui");
-  const sumsFile = join(DEFAULT_DIST_DIR, "SHA256SUMS");
+export function runSelfTest(outJsonPath, distDir = DEFAULT_DIST_DIR) {
+  const gpuiBin = join(distDir, "discord-gpui");
+  const sumsFile = join(distDir, "SHA256SUMS");
   if (!existsSync(gpuiBin) || !existsSync(sumsFile)) {
-    throw new Error("Отсутствуют эталонные артефакты rust/dist/discord-gpui или rust/dist/SHA256SUMS");
+    throw new Error("Expected discord-gpui and SHA256SUMS in " + distDir);
+  }
+  const rawBin = readFileSync(gpuiBin);
+  const expected = /^([a-f0-9]{64})\s+\*?discord-gpui\r?$/m.exec(readFileSync(sumsFile, "utf8"));
+  if (!expected || computeSha256(rawBin) !== expected[1]) {
+    throw new Error("discord-gpui does not match SHA256SUMS");
   }
 
   const tmp = mkdtempSync(join(tmpdir(), "delta-selftest-969-"));
   try {
-    const rawBin = readFileSync(gpuiBin);
     const v1Slice = Buffer.from(rawBin.subarray(0, Math.min(131_072, rawBin.byteLength)));
     const v2Slice = Buffer.concat([v1Slice.subarray(0, 8192), Buffer.from("SELF_TEST_DELTA_V1_0_0_BETA_2", "utf8"), v1Slice.subarray(8192)]);
 
@@ -905,6 +910,7 @@ function parseCliArgs(argv) {
     "--out-json": "outJson",
     "--fallback-full": "fallbackFullFile",
     "--engine": "engine",
+    "--dist-dir": "distDir",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -916,7 +922,14 @@ function parseCliArgs(argv) {
     }
     const key = valueFlags[arg];
     if (!key) return { mode: /** @type {const} */ ("invalid"), opts, error: `Неизвестный аргумент: ${arg}` };
-    opts[key] = argv[++i];
+    const value = argv[++i];
+    if (!value || value.startsWith("--")) {
+      return { mode: /** @type {const} */ ("invalid"), opts, error: `Missing value for ${arg}` };
+    }
+    opts[key] = value;
+  }
+  if (opts.distDir && mode !== "self-test") {
+    return { mode: /** @type {const} */ ("invalid"), opts, error: "--dist-dir requires --self-test" };
   }
   if (opts.engine !== "bsdiff43-zstd" && opts.engine !== "zstd-patch-from") {
     return { mode: /** @type {const} */ ("invalid"), opts, error: `Неизвестный движок: ${String(opts.engine)}` };
@@ -935,7 +948,7 @@ function parseCliArgs(argv) {
 export function runCli(argv) {
   const { mode, opts, error } = parseCliArgs(argv);
   if (mode === "help") {
-    process.stdout.write("Использование: node scripts/generate-delta.mjs [--generate|--verify|--apply|--self-test] [опции]\n");
+    process.stdout.write("Использование: node scripts/generate-delta.mjs [--generate|--verify|--apply|--self-test] [опции]\n  --self-test --dist-dir DIR: verify a binary against its SHA256SUMS\n");
     return 0;
   }
   if (mode === "invalid") {
@@ -944,7 +957,7 @@ export function runCli(argv) {
   }
   try {
     if (mode === "self-test") {
-      const report = runSelfTest(opts.outJson);
+      const report = runSelfTest(opts.outJson, opts.distDir);
       process.stdout.write(`Самотест бинарных дельт пройден: ${JSON.stringify(report)}\n`);
       return report.status === "passed" ? 0 : 2;
     }

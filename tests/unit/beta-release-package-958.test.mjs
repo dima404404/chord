@@ -18,10 +18,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiCandidate, gpuiTestDist as DIST_DIR, gpuiTestTarball as TARBALL_NAME, gpuiTestVersion } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const DIST_DIR = join(ROOT, "rust", "dist");
-const TARBALL_NAME = "discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz";
 const TARBALL_PATH = join(DIST_DIR, TARBALL_NAME);
 const SHA256SUMS_PATH = join(DIST_DIR, "SHA256SUMS");
 const BIN_PATH = join(DIST_DIR, "discord-gpui");
@@ -88,15 +87,16 @@ describe("TASK-958: Релизный пакет бета-версии, конт�
       entries.some((e) => e === suffix || e.endsWith(`/${suffix}`));
 
     assert.ok(hasEntry("discord-gpui"), "В архиве должен присутствовать бинарник discord-gpui");
-    assert.ok(hasEntry("LICENSE-MIT"), "В архиве должен присутствовать лицензионный файл LICENSE-MIT");
-    assert.ok(hasEntry("LICENSE-APACHE"), "В архиве должен присутствовать лицензионный файл LICENSE-APACHE");
+    for (const license of gpuiCandidate ? ["LICENSE"] : ["LICENSE-MIT", "LICENSE-APACHE"]) {
+      assert.ok(hasEntry(license), "Missing license in archive: " + license);
+    }
     assert.ok(hasEntry("sbom.spdx.json"), "В архиве должен присутствовать манифест лицензий sbom.spdx.json");
     assert.ok(
       hasEntry("BETA-TESTING-GUIDE.md"),
       "В архиве должно присутствовать руководство BETA-TESTING-GUIDE.md",
     );
     assert.ok(
-      hasEntry("RELEASE-NOTES-v1.0.0-beta.1.md"),
+      hasEntry(`RELEASE-NOTES-v${gpuiTestVersion}.md`),
       "В архиве должны присутствовать релизные заметки RELEASE-NOTES-v1.0.0-beta.1.md",
     );
 
@@ -112,6 +112,11 @@ describe("TASK-958: Релизный пакет бета-версии, конт�
       assert.ok(extractedBin, "Путь к discord-gpui внутри архива должен определяться");
       const extractedBinPath = join(tmp, extractedBin);
       assert.ok(existsSync(extractedBinPath), "Распакованный бинарник должен существовать");
+      if (gpuiCandidate) {
+        const license = entries.find((entry) => entry.endsWith("/LICENSE"));
+        assert.ok(license, "The staged binary must be accompanied by the project license");
+        assert.equal(sha256File(join(tmp, license)), sha256File(join(ROOT, "LICENSE")));
+      }
 
       // Проверка побайтового совпадения с эталоном rust/dist/discord-gpui
       const expectedBinSha = sha256File(BIN_PATH);

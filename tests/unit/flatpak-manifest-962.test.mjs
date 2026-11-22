@@ -21,11 +21,11 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiTestDist as DIST_DIR, gpuiTestPackaging } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const MANIFEST_DIR = join(ROOT, "packaging", "flatpak");
+const MANIFEST_DIR = join(gpuiTestPackaging, "flatpak");
 const MANIFEST_PATH = join(MANIFEST_DIR, "com.discord_lab.DiscordGpui.yml");
-const DIST_DIR = join(ROOT, "rust", "dist");
 const SHA256SUMS_PATH = join(DIST_DIR, "SHA256SUMS");
 
 /** Обязательные аргументы песочницы Flatpak по контракту TASK-962. */

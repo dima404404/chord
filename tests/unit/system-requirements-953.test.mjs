@@ -18,11 +18,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gpuiTestArtifact } from "../helpers/gpui-release-fixture.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SCRIPT_PATH = join(ROOT, "scripts", "verify-system-requirements.mjs");
 const DOC_PATH = join(ROOT, "docs", "SYSTEM-REQUIREMENTS.md");
-const DIST_BIN_PATH = join(ROOT, "rust", "dist", "discord-gpui");
 
 describe("TASK-953: Автономная верификация системных библиотек ldd, GLIBC <= 2.35 и llvmpipe", () => {
   it("SUB-953-1 (Шаг 1.1 & 1.3): анализирует вывод ldd, проверяет 0 отсутствующих библиотек и отсутствие проприетарных драйверов NVIDIA/AMD", async () => {
@@ -33,7 +33,7 @@ describe("TASK-953: Автономная верификация системны
     } = await import("../../scripts/verify-system-requirements.mjs");
 
     // 1. Реальная инспекция rust/dist/discord-gpui через ldd
-    const liveLdd = inspectBinaryLdd(DIST_BIN_PATH);
+    const liveLdd = inspectBinaryLdd(gpuiTestArtifact("discord-gpui"));
     assert.equal(liveLdd.passed, true, `Неожиданная ошибка ldd: ${liveLdd.reasons.join("; ")}`);
     assert.equal(liveLdd.missingLibraries.length, 0, "Все разделяемые библиотеки должны разрешаться");
     assert.equal(liveLdd.proprietaryLibraries.length, 0, "Не должно быть жёсткой привязки к NVIDIA/AMD");
@@ -129,7 +129,7 @@ describe("TASK-953: Автономная верификация системны
     assert.match(evalInvalid.reasons.join("; "), /GLIBC_2\.36/);
 
     // 4. Реальная инспекция релизного бинарника rust/dist/discord-gpui
-    const liveGlibc = inspectBinaryGlibc(DIST_BIN_PATH, "2.35");
+    const liveGlibc = inspectBinaryGlibc(gpuiTestArtifact("discord-gpui"), "2.35");
     assert.equal(liveGlibc.passed, true, `Проверка GLIBC не прошла: ${liveGlibc.reasons.join("; ")}`);
     assert.equal(liveGlibc.maxMandatoryLibcVersion, "2.34");
     assert.ok(compareGlibcVersions(liveGlibc.maxBaselineGlibcVersion, "2.35") <= 0);
@@ -149,7 +149,7 @@ describe("TASK-953: Автономная верификация системны
     assert.equal(env.CUSTOM_VAR, "1");
 
     // 2. Реальный холодный старт rust/dist/discord-gpui --headless-smoke под llvmpipe
-    const smoke = runLlvmPipeSmokeVerification(DIST_BIN_PATH);
+    const smoke = runLlvmPipeSmokeVerification(gpuiTestArtifact("discord-gpui"));
     assert.equal(smoke.passed, true, `llvmpipe smoke упал: ${smoke.reasons.join("; ")}`);
     assert.equal(smoke.exitCode, 0);
     assert.equal(smoke.payload?.status, "ok");
@@ -167,7 +167,7 @@ describe("TASK-953: Автономная верификация системны
       const outJson = join(tmp, "sys-req-report.json");
       const run = spawnSync(
         process.execPath,
-        [SCRIPT_PATH, "--out-json", outJson],
+        [SCRIPT_PATH, "--binary", gpuiTestArtifact("discord-gpui"), "--out-json", outJson],
         { cwd: ROOT, encoding: "utf8" },
       );
       assert.equal(run.status, 0, `stderr: ${run.stderr}`);
