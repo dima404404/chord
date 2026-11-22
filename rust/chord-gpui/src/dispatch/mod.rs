@@ -691,11 +691,14 @@ pub fn map_dispatch_event(event: &DispatchEvent) -> Option<BackgroundEvent> {
                 etf_required_snowflake(data, "user_id")?
             };
             let status = etf_required_non_empty_string(data, "status")?;
-            if let Some(activities) = data.get("activities").and_then(EtfValue::as_list) {
+            if let Some(activity) = data
+                .get("activities")
+                .and_then(SpotifyActivity::etf_activity_patch)
+            {
                 Some(BackgroundEvent::SpotifyPresenceUpdate {
                     user_id,
                     status,
-                    activity: SpotifyActivity::from_etf_activities(activities),
+                    activity,
                 })
             } else {
                 Some(BackgroundEvent::PresenceUpdate(user_id, status))

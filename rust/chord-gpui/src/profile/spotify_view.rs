@@ -158,7 +158,7 @@ fn listen_along_action(
     widget: &SpotifyProfileWidget,
     cx: &mut Context<AppLayout>,
 ) -> Option<AnyElement> {
-    if state.current_user.id == host_id {
+    if state.current_user.id.is_empty() || state.current_user.id == host_id {
         return None;
     }
     let command = widget.listen_along_command()?;
@@ -215,6 +215,7 @@ fn start_listen_along(layout: &mut AppLayout, host_id: &str, cx: &mut Context<Ap
         .spotify_listen_along
         .as_ref()
         .is_some_and(|action| action.result.is_none())
+        || state.current_user.id.is_empty()
         || state.current_user.id == host_id
         || !state
             .selected_member_profile
@@ -231,10 +232,11 @@ fn start_listen_along(layout: &mut AppLayout, host_id: &str, cx: &mut Context<Ap
     else {
         return;
     };
+    let (cancellation, cancelled) = async_channel::bounded(1);
     state.spotify_listen_along = Some(ListenAlongStatus {
         host_id: host_id.to_owned(),
         track_id: command.track_id.clone(),
-        requested_at,
+        cancellation: cancellation.clone(),
         result: None,
     });
     cx.notify();
@@ -244,12 +246,13 @@ fn start_listen_along(layout: &mut AppLayout, host_id: &str, cx: &mut Context<Ap
         command,
         requested_at,
         background.clone(),
+        cancelled,
     ));
     cx.spawn(async move |layout, cx| {
         let result = task.await;
         let _ = layout.update(cx, |layout, cx| {
             if let Some(action) = &mut layout.state.spotify_listen_along
-                && action.requested_at == requested_at
+                && action.cancellation.same_channel(&cancellation)
             {
                 action.result = Some(result);
                 cx.notify();

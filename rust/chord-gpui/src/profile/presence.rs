@@ -23,6 +23,24 @@ pub struct SpotifyActivity {
 }
 
 impl SpotifyActivity {
+    /// An omitted or malformed field does not change cached activity. An explicit null
+    /// or empty list clears it, including ETF NIL_EXT emitted for an empty list.
+    pub(crate) fn etf_activity_patch(value: &EtfValue) -> Option<Option<Self>> {
+        match value {
+            EtfValue::Nil => Some(None),
+            EtfValue::List(activities) => Some(Self::from_etf_activities(activities)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn json_activity_patch(value: &Value) -> Option<Option<Self>> {
+        match value {
+            Value::Null => Some(None),
+            Value::Array(activities) => Some(Self::from_json_activities(activities)),
+            _ => None,
+        }
+    }
+
     pub fn from_etf_activities(activities: &[EtfValue]) -> Option<Self> {
         activities.iter().find_map(Self::from_activity)
     }
@@ -181,7 +199,7 @@ pub(crate) fn milliseconds(duration: Duration) -> u64 {
 pub(crate) struct ListenAlongStatus {
     pub(crate) host_id: String,
     pub(crate) track_id: String,
-    pub(crate) requested_at: Instant,
+    pub(crate) cancellation: async_channel::Sender<()>,
     pub(crate) result: Option<Result<(), String>>,
 }
 #[cfg(test)]
@@ -247,6 +265,25 @@ mod tests {
         assert_eq!(start.elapsed_ms(), 9_000);
         assert_eq!(ended.progress_ratio(), 1.0);
         assert!(!ended.is_advancing());
+    }
+
+    #[test]
+    fn absent_or_malformed_activity_is_distinct_from_a_clear() {
+        assert_eq!(
+            SpotifyActivity::etf_activity_patch(&EtfValue::Nil),
+            Some(None)
+        );
+        assert_eq!(
+            SpotifyActivity::etf_activity_patch(&EtfValue::List(vec![])),
+            Some(None)
+        );
+        assert_eq!(SpotifyActivity::etf_activity_patch(&EtfValue::Int(9)), None);
+        assert_eq!(
+            SpotifyActivity::json_activity_patch(&Value::Null),
+            Some(None)
+        );
+        assert_eq!(SpotifyActivity::json_activity_patch(&json!([])), Some(None));
+        assert_eq!(SpotifyActivity::json_activity_patch(&json!(9)), None);
     }
 
     #[test]

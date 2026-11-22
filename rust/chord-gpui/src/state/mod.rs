@@ -1864,6 +1864,7 @@ impl AppState {
 
     /// Сохранение учетной записи в менеджере
     pub fn add_account(&mut self, user: CurrentUser, token: String) {
+        self.clear_spotify_profiles();
         for a in &mut self.accounts {
             a.is_active = false;
         }
@@ -2561,9 +2562,11 @@ impl AppState {
         }
     }
 
-    fn clear_spotify_profiles(&mut self) {
+    pub(crate) fn clear_spotify_profiles(&mut self) {
         self.spotify_profiles.clear();
-        self.spotify_listen_along = None;
+        if let Some(action) = self.spotify_listen_along.take() {
+            action.cancellation.close();
+        }
     }
 
     fn apply_presence_status(&mut self, user_id: &str, raw_status: &str) -> PresenceStatus {
@@ -2608,6 +2611,9 @@ impl AppState {
                 self.resume_gateway_url = resume_gateway_url;
                 if !user_id.is_empty() {
                     let user_changed = self.current_user.id != user_id;
+                    if user_changed {
+                        self.clear_spotify_profiles();
+                    }
                     self.current_user.id = user_id;
                     if !username.is_empty() {
                         if user_changed || self.current_user.global_name.is_none() {
