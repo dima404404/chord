@@ -5,6 +5,9 @@ use chord_platform::rpc_ipc::RpcActivity;
 use gpui::*;
 use gpui_kit::component::StyledExt;
 
+#[path = "../profile/spotify_view.rs"]
+mod spotify_view;
+
 /// Модель отображения блока Rich Presence (`SET_ACTIVITY`, `P2-2.3`) в `UserProfileCard`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,7 +213,7 @@ impl UserProfileCard {
 
     pub fn render(
         state: &AppState,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<AppLayout>,
     ) -> impl IntoElement {
         let member = match &state.selected_member_profile {
@@ -224,7 +227,17 @@ impl UserProfileCard {
             .clone()
             .unwrap_or_else(|| username.clone());
         let status = member.status;
-        let rich_presence = Self::rich_presence_block(state);
+        let spotify = state
+            .spotify_profiles
+            .get(&member.id)
+            .map(|snapshot| snapshot.widget_at(std::time::Instant::now()));
+        let rich_presence = if spotify.is_none() {
+            Self::rich_presence_block(state)
+        } else {
+            None
+        };
+        let spotify =
+            spotify.map(|widget| spotify_view::render(state, &member.id, widget, window, cx));
         let roles = member.roles.clone();
 
         div()
@@ -365,6 +378,7 @@ impl UserProfileCard {
                             // Разделитель
                             .child(div().h(px(1.)).w_full().bg(DISCORD_THEME.border_subtle))
                             // Живой блок Rich Presence (P2-2.3), скрывается при activity == None
+                            .children(spotify)
                             .children(rich_presence.map(|block| {
                                 div()
                                     .v_flex()

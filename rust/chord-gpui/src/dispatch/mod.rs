@@ -12,6 +12,10 @@ use chord_codec::etf::EtfValue;
 use chord_core::dispatch::{DispatchEvent, DispatchKind, TypedDispatch, parse_typed_dispatch_etf};
 use chord_json::JsonValue;
 
+#[path = "../profile/mod.rs"]
+pub mod profile;
+use profile::presence::SpotifyActivity;
+
 /// Обёртка для голосового токена `VOICE_SERVER_UPDATE`, скрывающая секрет в `Debug`/`Display`.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct RedactedVoiceToken(String);
@@ -53,6 +57,11 @@ impl fmt::Display for RedactedVoiceToken {
 pub enum BackgroundEvent {
     GatewayMessage(String, String), // channel_id, content
     PresenceUpdate(String, String), // user_id, status
+    SpotifyPresenceUpdate {
+        user_id: String,
+        status: String,
+        activity: Option<SpotifyActivity>,
+    },
     VoicePing(u32),                 // ping_ms
     ImageDecoded(String, u32, u32), // cache_key, width, height
     TaskCompleted(String),          // task_id
@@ -682,7 +691,15 @@ pub fn map_dispatch_event(event: &DispatchEvent) -> Option<BackgroundEvent> {
                 etf_required_snowflake(data, "user_id")?
             };
             let status = etf_required_non_empty_string(data, "status")?;
-            Some(BackgroundEvent::PresenceUpdate(user_id, status))
+            if let Some(activities) = data.get("activities").and_then(EtfValue::as_list) {
+                Some(BackgroundEvent::SpotifyPresenceUpdate {
+                    user_id,
+                    status,
+                    activity: SpotifyActivity::from_etf_activities(activities),
+                })
+            } else {
+                Some(BackgroundEvent::PresenceUpdate(user_id, status))
+            }
         }
         "TYPING_START" => {
             data.as_map()?;

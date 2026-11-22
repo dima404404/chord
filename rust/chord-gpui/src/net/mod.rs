@@ -2256,6 +2256,17 @@ impl DiscordGatewaySession {
                         _ => crate::state::PresenceStatus::Offline,
                     };
 
+                    if presence == crate::state::PresenceStatus::Offline {
+                        state.update_spotify_presence(user_id, None);
+                    } else if let Some(activities) =
+                        data.get("activities").and_then(serde_json::Value::as_array)
+                    {
+                        let activity = crate::dispatch::profile::presence::SpotifyActivity::from_json_activities(
+                            activities,
+                        );
+                        state.update_spotify_presence(user_id, activity);
+                    }
+
                     for m in &mut state.members {
                         if m.id == user_id {
                             m.status = presence;

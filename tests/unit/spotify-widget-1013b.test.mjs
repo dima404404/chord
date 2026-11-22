@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import os from 'node:os';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 const ROOT = process.cwd();
 const RS_PATH = path.join(ROOT, 'rust/chord-gpui/src/profile/spotify_widget.rs');
@@ -42,51 +43,71 @@ test('TASK-1013B: cargo test -p chord-gpui --bin chord-gpui profile::spotify_wid
 
 test('TASK-1013B: 5/5 mutation kill rate on spotify_widget.rs', () => {
   const original = fs.readFileSync(RS_PATH, 'utf8');
+  const listenAlongResult = [
+    'Some(ListenAlongCommand {',
+    '            track_id,',
+    '            position_ms: self.elapsed_ms,',
+    '        })',
+  ].join('\n');
   const mutants = [
     {
       name: 'wrong spotify green color',
       find: 'pub const SPOTIFY_GREEN_HEX: &str = "#1db954";',
       replace: 'pub const SPOTIFY_GREEN_HEX: &str = "#000000";',
+      assertion: 'uses_spotify_green',
     },
     {
       name: 'progress bar continues when paused',
       find: 'if !self.is_playing {',
       replace: 'if false {',
+      assertion: 'paused_playback_does_not_advance',
     },
     {
       name: 'desync threshold raised above 2s',
       find: 'pub const SPOTIFY_DESYNC_THRESHOLD_MS: u64 = 2_000;',
       replace: 'pub const SPOTIFY_DESYNC_THRESHOLD_MS: u64 = 10_000;',
+      assertion: 'corrects_drift_over_two_seconds',
     },
     {
       name: 'progress ratio not clamped to 1.0',
       find: '(self.elapsed_ms as f64 / self.duration_ms as f64).clamp(0.0, 1.0)',
       replace: '(self.elapsed_ms as f64 / self.duration_ms as f64) + 0.5',
+      assertion: 'progress_ratio_stays_in_range',
     },
     {
       name: 'listen along returns None when active',
-      find: 'Some(ListenAlongCommand {',
-      replace: 'None; let _unused = Some(ListenAlongCommand {',
+      find: listenAlongResult,
+      replace: `${listenAlongResult}.filter(|_| false)`,
+      assertion: 'active_track_produces_a_positioned_listen_along_command',
     },
   ];
 
+  // The timeline has no external dependencies. Compile each mutant independently so the
+  // checkout and Cargo target stay untouched and compilation errors cannot count as kills.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'chord-spotify-mutations-'));
+  const source = path.join(scratch, 'spotify_widget.rs');
+  const binary = path.join(scratch, process.platform === 'win32' ? 'spotify-tests.exe' : 'spotify-tests');
+  const commandOptions = { cwd: scratch, encoding: 'utf8' };
+
   try {
-    for (const m of mutants) {
-      assert.ok(original.includes(m.find), `Mutant anchor not found: ${m.name}`);
-      fs.writeFileSync(RS_PATH, original.replace(m.find, m.replace));
-      let killed = false;
-      try {
-        execFileSync(
-          'cargo',
-          ['test', '--manifest-path', 'rust/chord-gpui/Cargo.toml', '--bin', 'chord-gpui', 'profile::spotify_widget'],
-          { cwd: ROOT, stdio: 'pipe' }
-        );
-      } catch {
-        killed = true;
-      }
-      assert.ok(killed, `Mutant survived: ${m.name}`);
+    for (const mutant of mutants) {
+      assert.equal(original.split(mutant.find).length, 2, `Expected exactly one anchor: ${mutant.name}`);
+      fs.writeFileSync(source, original.replace(mutant.find, mutant.replace));
+      const compiled = spawnSync(
+        process.env.RUSTC || 'rustc',
+        ['--edition', '2024', '--test', source, '-o', binary],
+        commandOptions,
+      );
+      assert.ifError(compiled.error);
+      assert.equal(compiled.status, 0, `Mutant failed to compile: ${mutant.name}\n${compiled.stderr}`);
+
+      const tested = spawnSync(binary, [`tests::${mutant.assertion}`, '--exact'], commandOptions);
+      assert.ifError(tested.error);
+      const output = `${tested.stdout}\n${tested.stderr}`;
+      assert.equal(tested.status, 101, `Expected an assertion failure: ${mutant.name}\n${output}`);
+      assert.match(output, /test result: FAILED\. 0 passed; 1 failed;/, `Mutant survived: ${mutant.name}`);
     }
   } finally {
-    fs.writeFileSync(RS_PATH, original);
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
 });

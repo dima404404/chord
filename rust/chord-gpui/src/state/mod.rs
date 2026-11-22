@@ -3,6 +3,9 @@
 pub mod auth_flow;
 pub mod models;
 
+use crate::dispatch::profile::presence::{
+    ListenAlongStatus, SpotifyActivity, SpotifySnapshot, unix_ms,
+};
 #[allow(unused_imports)]
 pub use auth_flow::{
     AuthFlowController, AuthFlowError, AuthMode, LiveAuthStepOutcome, StartupAuthResult,
@@ -191,6 +194,8 @@ pub struct AppState {
     pub search_query: String,
     pub search_results: Vec<Message>,
     pub selected_member_profile: Option<GuildMember>,
+    pub(crate) spotify_profiles: HashMap<String, SpotifySnapshot>,
+    pub(crate) spotify_listen_along: Option<ListenAlongStatus>,
     pub is_create_channel_open: bool,
     pub new_channel_type: ChannelType,
     pub typing_users: HashMap<String, Vec<String>>, // channel_id -> Vec<username>
@@ -377,6 +382,8 @@ impl AppState {
             search_query: String::new(),
             search_results: Vec::new(),
             selected_member_profile: None,
+            spotify_profiles: HashMap::new(),
+            spotify_listen_along: None,
             is_create_channel_open: false,
             new_channel_type: ChannelType::GuildText,
             typing_users: HashMap::new(),
@@ -542,6 +549,7 @@ impl AppState {
         };
         self.guilds = Vec::new();
         self.members = Vec::new();
+        self.clear_spotify_profiles();
         self.relationships = Vec::new();
         self.messages = HashMap::new();
         self.dm_channels = HashMap::new();
@@ -580,6 +588,7 @@ impl AppState {
 
     /// Выход из учётной записи с открытием окна логина
     pub fn logout(&mut self) {
+        self.clear_spotify_profiles();
         self.active_token = None;
         self.current_user = CurrentUser::default();
         self.voice_session = None;
@@ -1830,6 +1839,7 @@ impl AppState {
             for a in &mut self.accounts {
                 a.is_active = false;
             }
+            self.clear_spotify_profiles();
             self.accounts[pos].is_active = true;
             self.current_user = self.accounts[pos].user.clone();
             self.active_token = Some(token.to_string());
@@ -2530,6 +2540,59 @@ impl AppState {
 
     /// Applies a single `BackgroundEvent` from the live Gateway / voice bridge into `AppState`.
     #[allow(dead_code)]
+    pub(crate) fn update_spotify_presence(
+        &mut self,
+        user_id: &str,
+        activity: Option<SpotifyActivity>,
+    ) {
+        let Some(activity) = activity else {
+            self.spotify_profiles.remove(user_id);
+            return;
+        };
+        let observed_at = std::time::Instant::now();
+        let now_ms = unix_ms();
+        if let Some(snapshot) = self.spotify_profiles.get_mut(user_id) {
+            snapshot.replace(activity, observed_at, now_ms);
+        } else {
+            self.spotify_profiles.insert(
+                user_id.to_owned(),
+                SpotifySnapshot::new(activity, observed_at, now_ms),
+            );
+        }
+    }
+
+    fn clear_spotify_profiles(&mut self) {
+        self.spotify_profiles.clear();
+        self.spotify_listen_along = None;
+    }
+
+    fn apply_presence_status(&mut self, user_id: &str, raw_status: &str) -> PresenceStatus {
+        let status = match raw_status.to_ascii_lowercase().as_str() {
+            "online" => PresenceStatus::Online,
+            "idle" => PresenceStatus::Idle,
+            "dnd" => PresenceStatus::Dnd,
+            "offline" | "invisible" => PresenceStatus::Offline,
+            _ => PresenceStatus::Online,
+        };
+        if self.current_user.id == user_id {
+            self.current_user.status = status;
+        }
+        for member in &mut self.members {
+            if member.id == user_id {
+                member.status = status;
+            }
+        }
+        for rel in &mut self.relationships {
+            if rel.user_id == user_id {
+                rel.status = status;
+            }
+        }
+        if status == PresenceStatus::Offline {
+            self.update_spotify_presence(user_id, None);
+        }
+        status
+    }
+
     pub fn apply_background_event(&mut self, event: crate::dispatch::BackgroundEvent) {
         use crate::dispatch::BackgroundEvent;
 
@@ -2881,25 +2944,15 @@ impl AppState {
                 }
             }
             BackgroundEvent::PresenceUpdate(user_id, raw_status) => {
-                let status = match raw_status.to_ascii_lowercase().as_str() {
-                    "online" => PresenceStatus::Online,
-                    "idle" => PresenceStatus::Idle,
-                    "dnd" => PresenceStatus::Dnd,
-                    "offline" | "invisible" => PresenceStatus::Offline,
-                    _ => PresenceStatus::Online,
-                };
-                if self.current_user.id == user_id {
-                    self.current_user.status = status;
-                }
-                for member in &mut self.members {
-                    if member.id == user_id {
-                        member.status = status;
-                    }
-                }
-                for rel in &mut self.relationships {
-                    if rel.user_id == user_id {
-                        rel.status = status;
-                    }
+                self.apply_presence_status(&user_id, &raw_status);
+            }
+            BackgroundEvent::SpotifyPresenceUpdate {
+                user_id,
+                status,
+                activity,
+            } => {
+                if self.apply_presence_status(&user_id, &status) != PresenceStatus::Offline {
+                    self.update_spotify_presence(&user_id, activity);
                 }
             }
             BackgroundEvent::GatewayMessage(channel_id, content) => {

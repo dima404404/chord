@@ -23,6 +23,8 @@ pub mod perf_benchmark;
 pub mod pipewire_portal;
 pub mod platform;
 mod process_rss;
+#[path = "profile/api.rs"]
+pub mod profile;
 pub mod quality_gate;
 pub mod session;
 mod state;
