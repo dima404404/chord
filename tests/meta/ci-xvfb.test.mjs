@@ -624,8 +624,8 @@ describe("TASK-621: scripts/ci.sh — управление Xvfb и авто-об
         `#!/usr/bin/env bash
 echo "$*" > "${argsLog}"
 disp="\${1#:}"
-touch "${x11Dir}/X\${disp}"
 trap 'rm -f "${x11Dir}/X\${disp}"; exit 0' TERM INT
+touch "${x11Dir}/X\${disp}"
 while true; do sleep 0.1; done
 `,
       );
