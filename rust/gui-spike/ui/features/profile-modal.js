@@ -27,6 +27,8 @@
  * @module ui/features/profile-modal
  */
 
+import { renderMessageMarkdown } from "./markdown.js";
+
 /**
  * Русские подписи статусов присутствия пользователя.
  * @type {Readonly<{ online: string, idle: string, dnd: string, offline: string }>}
@@ -99,6 +101,9 @@ export const PROFILE_EMPTY_STATES_RU = Object.freeze({
  * @property {string} [status]
  * @property {string} [bio]
  * @property {string} [about]
+ * @property {string} [bannerColor]
+ * @property {Array<{ id?: string, label: string }>} [badges]
+ * @property {{ name: string, type?: string, details?: string }} [activity]
  * @property {string} [note]
  * @property {Array<{ id?: string, roleId?: string, name?: string, label?: string, color?: string }>} [roles]
  * @property {Array<{ id?: string, name?: string } | string>} [mutualGuilds]
@@ -114,6 +119,9 @@ export const PROFILE_EMPTY_STATES_RU = Object.freeze({
  * @property {"online" | "idle" | "dnd" | "offline"} status
  * @property {string} statusLabelRu
  * @property {string} bio
+ * @property {string} bannerColor
+ * @property {string[]} badgeLabels
+ * @property {{ headline: string, details: string } | null} activity
  * @property {string} note
  * @property {Array<{ id: string, name: string, color: string }>} roles
  * @property {MutualGuildItem[]} mutualGuilds
@@ -186,6 +194,15 @@ function normalizeProfileData(raw) {
   const statusLabelRu = STATUS_LABELS_RU[status];
   const bio = String(source.bio ?? source.about ?? "");
   const note = String(source.note ?? "");
+  const bannerColor = String(source.bannerColor ?? "");
+  const badgeLabels = Array.isArray(source.badges)
+    ? source.badges.flatMap((badge) => typeof badge?.label === "string" && badge.label.trim() ? [badge.label] : [])
+    : [];
+  const activityName = String(source.activity?.name ?? "").trim();
+  const activity = activityName ? {
+    headline: [String(source.activity?.type ?? "").trim(), activityName].filter(Boolean).join(" "),
+    details: String(source.activity?.details ?? ""),
+  } : null;
 
   /** @type {Array<{ id: string, name: string, color: string }>} */
   const roles = [];
@@ -247,6 +264,9 @@ function normalizeProfileData(raw) {
     status,
     statusLabelRu,
     bio,
+    bannerColor: /^#[0-9a-f]{6}$/i.test(bannerColor) ? bannerColor : "",
+    badgeLabels,
+    activity,
     note,
     roles,
     mutualGuilds,
@@ -324,6 +344,23 @@ function buildProfileHeader(doc, profile) {
   const header = doc.createElement("header");
   header.setAttribute("data-profile-header", "");
 
+  if (profile.bannerColor) {
+    const banner = doc.createElement("div");
+    banner.setAttribute("data-profile-banner", "");
+    banner.className = "user-popout-banner";
+    banner.style.backgroundColor = profile.bannerColor;
+    header.appendChild(banner);
+  }
+
+  const avatar = doc.createElement("span");
+  avatar.setAttribute("data-profile-avatar", "");
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = ([...profile.displayName][0] ?? "?").toUpperCase();
+  const indicator = doc.createElement("span");
+  indicator.setAttribute("data-status", profile.status);
+  avatar.appendChild(indicator);
+  header.appendChild(avatar);
+
   const displayNameEl = doc.createElement("h3");
   displayNameEl.setAttribute("data-profile-display-name", "");
   displayNameEl.textContent = profile.displayName;
@@ -346,6 +383,17 @@ function buildProfileHeader(doc, profile) {
   statusBadge.setAttribute("data-profile-status", profile.status);
   statusBadge.textContent = profile.statusLabelRu;
   header.appendChild(statusBadge);
+
+  if (profile.badgeLabels.length > 0) {
+    const badges = doc.createElement("div");
+    badges.setAttribute("data-profile-badges", "");
+    for (const label of profile.badgeLabels) {
+      const badge = doc.createElement("span");
+      badge.textContent = label;
+      badges.appendChild(badge);
+    }
+    header.appendChild(badges);
+  }
 
   return header;
 }
@@ -513,8 +561,22 @@ export function createProfileModalController(containerEl, options = {}) {
 
     const bioEl = doc.createElement("p");
     bioEl.setAttribute("data-profile-bio", "");
-    bioEl.textContent = profile.bio;
+    renderMessageMarkdown(bioEl, profile.bio);
     card.appendChild(bioEl);
+
+    if (profile.activity) {
+      const activity = doc.createElement("div");
+      activity.setAttribute("data-profile-activity", "");
+      const headline = doc.createElement("strong");
+      headline.textContent = profile.activity.headline;
+      activity.appendChild(headline);
+      if (profile.activity.details) {
+        const details = doc.createElement("p");
+        details.textContent = profile.activity.details;
+        activity.appendChild(details);
+      }
+      card.appendChild(activity);
+    }
 
     card.appendChild(buildRolesList(doc, profile.roles));
     card.appendChild(buildNoteInput(doc, profile, options.onSaveNote));

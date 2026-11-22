@@ -49,9 +49,10 @@ export const FAKE_TAURI_VERSION = 1;
  * ВАЖНО: функция должна быть самодостаточной — она сериализуется в страницу
  * через `toString()`, поэтому не использует импорты и замыкания модуля.
  * @param {Record<string, any>} [spec]
+ * @param {readonly string[]} [rejectedEvents]
  * @returns {FakeTauriQa}
  */
-export function installFakeTauri(spec) {
+export function installFakeTauri(spec, rejectedEvents) {
   "use strict";
   const scope = /** @type {any} */ (globalThis);
   const win = scope.window && typeof scope.window === "object" ? scope.window : scope;
@@ -250,6 +251,9 @@ export function installFakeTauri(spec) {
        */
       listen: async (name, handler) => {
         const key = String(name);
+        if (rejectedEvents?.includes(key)) {
+          throw new Error("Fake Tauri cannot listen for " + key);
+        }
         const bucket = listeners.get(key) ?? [];
         bucket.push(handler);
         listeners.set(key, bucket);
@@ -357,8 +361,9 @@ export function installFakeTauri(spec) {
 /**
  * Исходник для инъекции в `index.html` перед `<script type="module" src="app.js">`.
  * @param {Record<string, any>} [spec]
+ * @param {readonly string[]} [rejectedEvents]
  * @returns {string}
  */
-export function bootstrapSource(spec = {}) {
-  return `(${installFakeTauri.toString()})(${JSON.stringify(spec)});`;
+export function bootstrapSource(spec = {}, rejectedEvents = []) {
+  return `(${installFakeTauri.toString()})(${JSON.stringify(spec)}, ${JSON.stringify(rejectedEvents)});`;
 }

@@ -352,6 +352,58 @@ describe("createTauriEventListener — реактивный слушатель �
     assert.equal(received.length, countAfterStop, "После stop() новые тики не должны вызываться");
   });
 
+  it("reports a rejected subscription consistently across repeated starts", async (t) => {
+    let attempts = 0;
+    const listener = createTauriEventListener({
+      event: "gateway-status",
+      listen: async () => {
+        attempts += 1;
+        throw new Error("Event transport unavailable");
+      },
+      onEvent() {},
+    });
+    t.after(() => listener.dispose());
+
+    assert.deepEqual(await Promise.all([listener.start(), listener.start()]), [false, false]);
+    assert.equal(await listener.start(), false);
+    assert.equal(attempts, 1);
+  });
+
+  it("ignores an initial fetch failure from a stopped run", async (t) => {
+    /** @type {(error: Error) => void} */
+    let rejectFetch = () => {};
+    const pendingFetch = new Promise((_resolve, reject) => { rejectFetch = reject; });
+    let markFetchStarted = () => {};
+    const fetchStarted = new Promise((resolve) => {
+      markFetchStarted = () => resolve(undefined);
+    });
+    /** @type {unknown[]} */
+    const errors = [];
+    let fetchCount = 0;
+    const listener = createTauriEventListener({
+      event: "gateway-status",
+      initialFetch() {
+        if (++fetchCount === 1) {
+          markFetchStarted();
+          return pendingFetch;
+        }
+        return { status: "ready" };
+      },
+      listen: async () => {},
+      onEvent() {},
+      onError: (error) => errors.push(error),
+    });
+    t.after(() => listener.dispose());
+
+    const oldRun = listener.start();
+    await fetchStarted;
+    await listener.stop();
+    assert.equal(await listener.start(), true);
+    rejectFetch(new Error("Cancelled fetch"));
+    assert.equal(await oldRun, false);
+    assert.deepEqual(errors, []);
+  });
+
   it("emitMock доставляет пэйлоад в onEvent", async () => {
     /** @type {unknown[]} */
     const received = [];

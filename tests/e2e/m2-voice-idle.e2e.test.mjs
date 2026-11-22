@@ -47,6 +47,9 @@ describe("M2-07: voice panel disabled/idle (реальный index.html)", () =>
       audioPlay: 0,
     }));
     assert.equal(await ui.callCount("send_typing"), 0, "send_typing до действия пользователя");
+    // Wait for an independent background tick before checking idle voice IPC.
+    await ui.waitFor("window.__QA__.count('process_metrics') >= 2", { label: "idle measurement tick" });
+    assert.equal(await ui.callCount("voice_rtc_status"), 0, "голосовой статус запрошен на скрытом экране");
 
     // 3. Клик «Войти»: только видимая причина, без IPC и захвата устройств.
     const before = await ui.eval("window.__QA__.calls.length");

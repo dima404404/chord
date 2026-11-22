@@ -883,13 +883,15 @@ export async function cleanupUiFixture({ opened, browser, server, dir }) {
  * Поднимает fixture-страницу: сервер `ui/` + fake `__TAURI__`, headless Chromium,
  * CDP, ожидание boot. Без браузера — `InfraError` (не skip).
  * @param {import("node:test").TestContext} t
- * @param {{ commands?: Record<string, any>, env?: Record<string, string | undefined>, timeoutMs?: number }} [options]
+ * @param {{ commands?: Record<string, any>, rejectedEvents?: readonly string[], env?: Record<string, string | undefined>, timeoutMs?: number }} [options]
  * @returns {Promise<UiFixture>}
  */
 export async function openUiFixture(t, options = {}) {
   const env = options.env ?? process.env;
   const bin = requireBrowser(env);
-  const server = await startUiServer({ bootstrap: bootstrapSource(options.commands ?? {}) });
+  const server = await startUiServer({
+    bootstrap: bootstrapSource(options.commands, options.rejectedEvents),
+  });
   /** @type {string | null} */
   let dir = null;
   /** @type {{ child: import("node:child_process").ChildProcess, endpoint: string } | null} */
@@ -926,7 +928,7 @@ export async function openUiFixture(t, options = {}) {
  * Хэндл с уже пройденным входом (`auth_status → ready`) — базовый вход для
  * M2-02…M2-07. M2-01 (сам вход) вызывает `openUiFixture` напрямую.
  * @param {import("node:test").TestContext} t
- * @param {{ overrides?: Record<string, any>, timeoutMs?: number }} [options]
+ * @param {{ overrides?: Record<string, any>, rejectedEvents?: readonly string[], timeoutMs?: number }} [options]
  * @returns {Promise<UiFixture>}
  */
 export async function openApp(t, options = {}) {
@@ -936,6 +938,7 @@ export async function openApp(t, options = {}) {
       auth_status: { ok: data.auth.ready },
       ...(options.overrides ?? {}),
     }),
+    rejectedEvents: options.rejectedEvents,
     timeoutMs: options.timeoutMs,
   });
   await fixture.waitFor(

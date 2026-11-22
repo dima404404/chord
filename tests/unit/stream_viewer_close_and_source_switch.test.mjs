@@ -12,11 +12,14 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 describe("Stream Viewer Close, Bottom Preview Teardown & Live Source Switch Parity", () => {
   const dataRs = fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/src/data.rs"), "utf8");
   const wsRs = fs.readFileSync(path.join(REPO_ROOT, "rust/crates/chord-core/src/ws.rs"), "utf8");
+  const rendererJs = fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/ui/features/voice-stage-renderer.js"), "utf8");
+  const connectionJs = fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/ui/features/voice-connection-controller.js"), "utf8");
   const appJs = [
     fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/ui/app.js"), "utf8"),
     fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/ui/features/voice-stage-viewer.js"), "utf8"),
     fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/ui/features/voice-stage-viewer-controls.js"), "utf8"),
-    fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/ui/features/voice-stage-renderer.js"), "utf8"),
+    rendererJs,
+    connectionJs,
     fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/ui/features/voice-stream-controller.js"), "utf8"),
     fs.readFileSync(path.join(REPO_ROOT, "rust/gui-spike/ui/features/voice-stream-menus.js"), "utf8"),
   ].join("\n");
@@ -76,19 +79,29 @@ describe("Stream Viewer Close, Bottom Preview Teardown & Live Source Switch Pari
         !appJs.includes("getElementById('live-stream-pip')"),
       "app.js must not contain the typo getElementById('live-stream-pip'); must use 'live-stream-pip-preview'",
     );
-    const fnIdx = appJs.indexOf("function renderLiveVoicePanel()");
-    assert.ok(fnIdx > 0, "renderLiveVoicePanel must exist in app.js");
-    const fnBody = appJs.slice(fnIdx, fnIdx + 16000);
-    assert.match(
-      fnBody,
-      /document\.getElementById\("live-stream-stage-viewer"\)\?\.remove\(\)/,
-      "renderLiveVoicePanel stopStreamBtn must remove live-stream-stage-viewer from DOM",
-    );
-    assert.match(
-      fnBody,
-      /document\.getElementById\("live-stream-pip-preview"\)\?\.remove\(\)/,
-      "renderLiveVoicePanel stopStreamBtn must remove live-stream-pip-preview from DOM",
-    );
+    const stopStart = rendererJs.indexOf('stopStreamBtn.addEventListener("click",');
+    const stopEnd = rendererJs.indexOf("sRight.append(changeStreamSourceBtn, stopStreamBtn)", stopStart);
+    assert.ok(stopStart >= 0 && stopEnd > stopStart, "stopStreamBtn click handler must exist");
+
+    const disconnectStart = connectionJs.indexOf("function disconnectFromLiveVoiceChannel()");
+    const disconnectEnd = connectionJs.indexOf("function promptVoiceChannelSwitch(", disconnectStart);
+    assert.ok(disconnectStart >= 0 && disconnectEnd > disconnectStart, "voice disconnect handler must exist");
+
+    for (const { handler, body } of [
+      { handler: "stopStreamBtn", body: rendererJs.slice(stopStart, stopEnd) },
+      { handler: "disconnectFromLiveVoiceChannel", body: connectionJs.slice(disconnectStart, disconnectEnd) },
+    ]) {
+      assert.match(
+        body,
+        /document\.getElementById\("live-stream-stage-viewer"\)\?\.remove\(\)/,
+        handler + " must remove live-stream-stage-viewer from DOM",
+      );
+      assert.match(
+        body,
+        /document\.getElementById\("live-stream-pip-preview"\)\?\.remove\(\)/,
+        handler + " must remove live-stream-pip-preview from DOM",
+      );
+    }
   });
 
   it("SV5: app.js supports live source switching without dropping stream connection across Stage Viewer, PIP, and Voice Panel", () => {

@@ -1571,18 +1571,24 @@ export class GuiDom {
 
   /** Снимает патч консоли, чистит очереди и отвязывает окружение от глобалов. */
   dispose() {
+    if (this.disposed) return;
     this.disposed = true;
-    this.rafQueue.clear();
-    this.timers.clear();
-    this.observers.clear();
-    console.error = this.realError;
-    console.warn = this.realWarn;
-    const globals = /** @type {Record<string, any>} */ (/** @type {unknown} */ (globalThis));
-    globals.setTimeout = REAL_SET_TIMEOUT;
-    globals.clearTimeout = REAL_CLEAR_TIMEOUT;
-    globals.setInterval = REAL_SET_INTERVAL;
-    globals.clearInterval = REAL_CLEAR_INTERVAL;
-    if (activeEnv === this) activeEnv = null;
+    try {
+      // Let the application release its listeners and timers before unpatching the globals.
+      this.window.dispatchEvent({ type: "pagehide" });
+    } finally {
+      this.rafQueue.clear();
+      this.timers.clear();
+      this.observers.clear();
+      console.error = this.realError;
+      console.warn = this.realWarn;
+      const globals = /** @type {Record<string, any>} */ (/** @type {unknown} */ (globalThis));
+      globals.setTimeout = REAL_SET_TIMEOUT;
+      globals.clearTimeout = REAL_CLEAR_TIMEOUT;
+      globals.setInterval = REAL_SET_INTERVAL;
+      globals.clearInterval = REAL_CLEAR_INTERVAL;
+      if (activeEnv === this) activeEnv = null;
+    }
   }
 }
 

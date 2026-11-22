@@ -18,7 +18,7 @@ const POLL_TIMEOUT = 8000;
 
 describe("M2-06: reconnect/offline banner → retry (реальный index.html)", () => {
   it("ready скрыт → reconnecting/offline видимы → retry один, 401 видим, цикла нет", async (t) => {
-    const ui = await openApp(t);
+    const ui = await openApp(t, { rejectedEvents: ["gateway-status"] });
 
     // 1. До разрыва баннер скрыт, авто-connect не вызывался.
     assert.equal(await ui.visible("#net-status"), false, "баннер виден при ready");

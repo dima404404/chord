@@ -393,107 +393,89 @@ export function createTauriEventListener(options) {
     ? () => customListen
     : () => resolveTauriListen();
 
-  /** @type {(() => void) | null} */
-  let unlistenFn = null;
-  /** @type {Promise<void> | null} */
-  let pendingSubscription = null;
-  /** @type {ReturnType<typeof setInterval> | null} */
-  let pollIntervalTimer = null;
-  let active = false;
+  /** @typedef {{startup: Promise<boolean>, subscription?: Promise<boolean>, timer?: ReturnType<typeof setInterval>, unlisten?: () => void}} ListenerRun */
+  /** @type {ListenerRun | null} */
+  let current = null;
   let disposed = false;
 
   /**
-   * Starts listening to the Tauri event.
-   * Runs `initialFetch` if provided and hooks into the event bus.
+   * Starts listening and shares the registration result with concurrent callers.
    * @returns {Promise<boolean>}
    */
-  async function start() {
-    if (disposed || active) {
-      return active;
-    }
-    active = true;
+  function start() {
+    if (disposed) return Promise.resolve(false);
+    if (current) return current.startup;
 
-    // Run initial fetch if provided (to initialize state without CPU polling)
+    // Publish the run before invoking callbacks that can stop or restart it.
+    /** @type {ListenerRun} */
+    const run = { startup: Promise.resolve().then(() => register(run)) };
+    current = run;
+    return run.startup;
+  }
+
+  /** @param {ListenerRun} run */
+  async function register(run) {
+    if (current !== run) return false;
+
     if (typeof initialFetch === "function") {
       try {
         const initialValue = await initialFetch();
-        if (active && !disposed) {
+        if (current === run) {
           onEvent(unwrapTauriPayload(initialValue), initialValue);
         }
       } catch (err) {
-        if (typeof onError === "function") {
-          onError(err);
-        }
+        if (current === run) onError?.(err);
       }
     }
 
-    if (!active || disposed) {
-      return false;
-    }
+    if (current !== run) return false;
 
-    // Start periodic polling fallback if intervalMs is specified
     if (typeof intervalMs === "number" && intervalMs > 0 && typeof initialFetch === "function") {
-      if (pollIntervalTimer) {
-        clearInterval(pollIntervalTimer);
-      }
-      pollIntervalTimer = setInterval(async () => {
-        if (!active || disposed) return;
+      run.timer = setInterval(async () => {
+        if (current !== run) return;
         try {
-          const val = await initialFetch();
-          if (active && !disposed && val !== null && val !== undefined) {
-            onEvent(unwrapTauriPayload(val), val);
+          const value = await initialFetch();
+          if (current === run && value !== null && value !== undefined) {
+            onEvent(unwrapTauriPayload(value), value);
           }
         } catch (pollErr) {
-          if (typeof onError === "function") {
-            onError(pollErr);
-          }
+          if (current === run) onError?.(pollErr);
         }
       }, intervalMs);
     }
 
     const listen = resolveListenFn();
-    if (typeof listen !== "function") {
-      // Event transport not available in this environment
-      return false;
-    }
+    if (typeof listen !== "function") return false;
 
-    if (unlistenFn || pendingSubscription) {
-      return true;
-    }
-
-    pendingSubscription = (async () => {
+    run.subscription = (async () => {
       try {
-        const dispose = await listen(eventName, (rawEvent) => {
-          if (!active || disposed) return;
+        const unlisten = await listen(eventName, (rawEvent) => {
+          if (current !== run) return;
           try {
-            const payload = unwrapTauriPayload(rawEvent);
-            onEvent(payload, rawEvent);
+            onEvent(unwrapTauriPayload(rawEvent), rawEvent);
           } catch (dispatchErr) {
             onError?.(dispatchErr);
           }
         });
 
-        if (!active || disposed) {
-          if (typeof dispose === "function") {
-            try {
-              dispose();
-            } catch {
-              /* ignore */
-            }
+        if (current === run) {
+          run.unlisten = typeof unlisten === "function" ? unlisten : undefined;
+          return true;
+        }
+        if (typeof unlisten === "function") {
+          try {
+            unlisten();
+          } catch {
+            /* ignore */
           }
-          unlistenFn = null;
-        } else {
-          unlistenFn = typeof dispose === "function" ? dispose : null;
         }
       } catch (subErr) {
-        onError?.(subErr);
-      } finally {
-        pendingSubscription = null;
+        if (current === run) onError?.(subErr);
       }
+      return false;
     })();
 
-    await pendingSubscription;
-    return active;
+    return (await run.subscription) && current === run;
   }
 
   /**
@@ -501,26 +483,20 @@ export function createTauriEventListener(options) {
    * @returns {Promise<void>}
    */
   async function stop() {
-    active = false;
-    if (pollIntervalTimer) {
-      clearInterval(pollIntervalTimer);
-      pollIntervalTimer = null;
+    const run = current;
+    current = null;
+    if (!run) return;
+
+    if (run.timer) clearInterval(run.timer);
+    try {
+      await run.subscription;
+    } catch {
+      /* ignore */
     }
-    if (pendingSubscription) {
-      try {
-        await pendingSubscription;
-      } catch {
-        /* ignore */
-      }
-    }
-    if (unlistenFn) {
-      const fn = unlistenFn;
-      unlistenFn = null;
-      try {
-        fn();
-      } catch {
-        /* ignore */
-      }
+    try {
+      run.unlisten?.();
+    } catch {
+      /* ignore */
     }
   }
 
@@ -529,7 +505,7 @@ export function createTauriEventListener(options) {
    * @returns {boolean}
    */
   function isListening() {
-    return active && !disposed;
+    return current !== null;
   }
 
   /**

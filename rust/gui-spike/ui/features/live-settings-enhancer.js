@@ -1295,9 +1295,7 @@ export function mountLiveDiscordSettings(ctx) {
 
   if (invoke && typeof setInterval === "function") {
     setInterval(async () => {
-      if (!secVoice.isConnected || secVoice.hasAttribute("hidden")) return;
-      const settingsScreen = doc.getElementById("screen-settings");
-      if (settingsScreen && settingsScreen.hasAttribute("hidden")) return;
+      if (!secVoice.isConnected || secVoice.closest('[hidden], [aria-hidden="true"]')) return;
       try {
         const st = await invoke(VOICE_RTC_STATUS_IPC_CMD);
         const db = typeof st?.localMicLevelDb === "number" ? st.localMicLevelDb : -100;
