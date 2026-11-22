@@ -183,8 +183,8 @@ jobs:
       - name: Native platform contracts
         if: ${{ !cancelled() && steps.tauri_build.outcome == 'success' }}
         run: |
-          cargo test --locked --manifest-path rust/Cargo.toml -p chord-platform \
-            --target "${{ matrix.target }}" --lib --tests
+          cargo test --locked --manifest-path rust/Cargo.toml -p chord-platform -p chord-audio-runtime \
+            --target "${{ matrix.target }}" --lib --tests --no-fail-fast
 
       - name: Native store key contracts
         if: ${{ !cancelled() && steps.tauri_build.outcome == 'success' }}

@@ -14,30 +14,36 @@ pub struct AudioEngine;
 impl AudioEngine {
     /// Получить список доступных микрофонов (устройств ввода)
     pub fn list_input_devices() -> Vec<String> {
-        let host = cpal::default_host();
-        let mut names = Vec::new();
-        if let Ok(devices) = host.input_devices() {
-            for dev in devices {
-                if let Ok(name) = dev.name() {
-                    names.push(name);
+        chord_audio_runtime::with_audio_backend(|| {
+            let host = cpal::default_host();
+            let mut names = Vec::new();
+            if let Ok(devices) = host.input_devices() {
+                for dev in devices {
+                    if let Ok(name) = dev.name() {
+                        names.push(name);
+                    }
                 }
             }
-        }
-        names
+            names
+        })
+        .unwrap_or_default()
     }
 
     /// Получить список доступных динамиков / наушников (устройств вывода)
     pub fn list_output_devices() -> Vec<String> {
-        let host = cpal::default_host();
-        let mut names = Vec::new();
-        if let Ok(devices) = host.output_devices() {
-            for dev in devices {
-                if let Ok(name) = dev.name() {
-                    names.push(name);
+        chord_audio_runtime::with_audio_backend(|| {
+            let host = cpal::default_host();
+            let mut names = Vec::new();
+            if let Ok(devices) = host.output_devices() {
+                for dev in devices {
+                    if let Ok(name) = dev.name() {
+                        names.push(name);
+                    }
                 }
             }
-        }
-        names
+            names
+        })
+        .unwrap_or_default()
     }
 
     /// Проверка наличия и зондирование видеокамер системы Linux (/dev/video*)

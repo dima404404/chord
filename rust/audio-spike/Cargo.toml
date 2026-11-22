@@ -13,6 +13,7 @@ name = "audio_spike"
 path = "src/lib.rs"
 
 [dependencies]
+chord-audio-runtime = { path = "../crates/chord-audio-runtime" }
 cpal = "0.15.3"
 crossbeam-queue = "0.3"
 

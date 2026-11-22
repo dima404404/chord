@@ -37,6 +37,7 @@ dependencies = [
 name = "audio-spike"
 version = "0.1.0"
 dependencies = [
+ "chord-audio-runtime",
  "cpal",
  "crossbeam-queue",
 ]
@@ -121,6 +122,14 @@ name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "chord-audio-runtime"
+version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "clang-sys"

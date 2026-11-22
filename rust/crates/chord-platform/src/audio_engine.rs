@@ -780,7 +780,9 @@ impl NativeAudioEngine {
         std::thread::Builder::new()
             .name(format!("chord-sfx-{}", cue.as_str()))
             .spawn(move || {
-                let _ = play_pcm_buffer_on_cpal(scaled, out_dev_name.as_deref(), epoch_now);
+                let _ = chord_audio_runtime::with_audio_backend(move || {
+                    play_pcm_buffer_on_cpal(scaled, out_dev_name.as_deref(), epoch_now)
+                });
             })
             .ok();
 
@@ -828,7 +830,9 @@ impl NativeAudioEngine {
         std::thread::Builder::new()
             .name("chord-cpal-mic-probe".to_string())
             .spawn(move || {
-                let _ = run_cpal_mic_probe(selected_in.as_deref(), start_epoch);
+                let _ = chord_audio_runtime::with_audio_backend(move || {
+                    run_cpal_mic_probe(selected_in.as_deref(), start_epoch)
+                });
             })
             .ok();
     }
@@ -847,8 +851,7 @@ pub fn global_audio_engine() -> &'static NativeAudioEngine {
     ENGINE.get_or_init(NativeAudioEngine::new)
 }
 
-/// Enumerates devices directly via `cpal::default_host().devices()`.
-fn enumerate_cpal_devices_raw() -> AudioDeviceInventory {
+fn enumerate_cpal_devices() -> AudioDeviceInventory {
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
     let mut default_input = String::from("default");
@@ -908,6 +911,29 @@ fn enumerate_cpal_devices_raw() -> AudioDeviceInventory {
             }
         }
     }
+
+    AudioDeviceInventory {
+        inputs,
+        outputs,
+        default_input,
+        default_output,
+    }
+}
+
+fn enumerate_cpal_devices_raw() -> AudioDeviceInventory {
+    let AudioDeviceInventory {
+        mut inputs,
+        mut outputs,
+        default_input,
+        default_output,
+    } = chord_audio_runtime::with_audio_backend(enumerate_cpal_devices).unwrap_or_else(|_| {
+        AudioDeviceInventory {
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            default_input: String::from("default"),
+            default_output: String::from("default"),
+        }
+    });
 
     if inputs.is_empty() {
         inputs.push(NativeAudioDeviceInfo {

@@ -1006,6 +1006,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "chord-audio-runtime"
+version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "chord-codec"
 version = "0.1.0"
 dependencies = [
@@ -1048,6 +1056,7 @@ dependencies = [
  "aes-gcm",
  "async-channel",
  "chacha20poly1305",
+ "chord-audio-runtime",
  "chord-codec",
  "chord-core",
  "chord-i18n",
@@ -1091,6 +1100,7 @@ name = "chord-platform"
 version = "0.1.0"
 dependencies = [
  "ashpd",
+ "chord-audio-runtime",
  "cpal",
  "enumflags2",
  "keyring",

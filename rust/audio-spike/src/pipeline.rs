@@ -84,6 +84,11 @@ impl AudioPipelineBridge {
 
     /// Enumerate available native host devices for input or output via `cpal`.
     pub fn enumerate_devices(direction: DeviceDirection) -> Vec<AudioDeviceInfo> {
+        chord_audio_runtime::with_audio_backend(move || Self::enumerate_cpal_devices(direction))
+            .unwrap_or_default()
+    }
+
+    fn enumerate_cpal_devices(direction: DeviceDirection) -> Vec<AudioDeviceInfo> {
         let host = cpal::default_host();
         let default_device_name = match direction {
             DeviceDirection::Input => host.default_input_device().and_then(|d| d.name().ok()),
