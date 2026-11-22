@@ -162,9 +162,6 @@ jobs:
         id: tauri_contracts
         if: ${{ !cancelled() && steps.tauri_build.outcome == 'success' }}
         run: |
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            export PATH="$(cygpath -u "$TAURI_NATIVE_DLL_DIR"):$PATH"
-          fi
           cargo test --locked --manifest-path rust/gui-spike/Cargo.toml \
             --target "${{ matrix.target }}" --features tauri/custom-protocol --lib --tests --no-fail-fast
 

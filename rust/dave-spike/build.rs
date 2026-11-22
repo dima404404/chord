@@ -5,8 +5,8 @@ fn main() {
     println!("cargo:rerun-if-changed=cpp/dave_c_api.cpp");
 
     let crypto_includes = if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-        // Keep the matching DLLs in Cargo's runtime search path for test binaries.
         vcpkg::Config::new()
+            .copy_dlls(false)
             .find_package("openssl")
             .expect("install OpenSSL for the MSVC target triplet with vcpkg")
             .include_paths
