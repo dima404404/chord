@@ -5253,6 +5253,35 @@ pub fn connect_or_update_live_voice_ext(
     self_video: bool,
     self_stream: bool,
 ) -> Result<Value, String> {
+    connect_or_update_live_voice_ext_with_scheduler(
+        guild_id,
+        channel_id,
+        self_mute,
+        self_deaf,
+        self_video,
+        self_stream,
+        spawn_voice_state_update,
+    )
+}
+
+fn spawn_voice_state_update(delay: std::time::Duration, send: Box<dyn FnOnce() + Send>) {
+    let send_deadline = std::time::Instant::now() + delay;
+    std::thread::spawn(move || {
+        std::thread::sleep(send_deadline.saturating_duration_since(std::time::Instant::now()));
+        send();
+    });
+}
+
+#[doc(hidden)]
+pub fn connect_or_update_live_voice_ext_with_scheduler(
+    guild_id: Option<String>,
+    channel_id: Option<String>,
+    self_mute: bool,
+    self_deaf: bool,
+    self_video: bool,
+    self_stream: bool,
+    schedule: impl FnOnce(std::time::Duration, Box<dyn FnOnce() + Send>),
+) -> Result<Value, String> {
     use std::sync::atomic::Ordering;
     let clean_gid = guild_id
         .map(|s| s.trim().to_string())
@@ -5683,10 +5712,7 @@ pub fn connect_or_update_live_voice_ext(
         let gid_for_timer = clean_gid.clone();
         let cid_for_timer = clean_cid.clone();
         let uid_for_timer = self_uid.clone();
-        // Measure the debounce window from the update, including thread startup.
-        let send_deadline = std::time::Instant::now() + std::time::Duration::from_millis(120);
-        std::thread::spawn(move || {
-            std::thread::sleep(send_deadline.saturating_duration_since(std::time::Instant::now()));
+        let send = Box::new(move || {
             let should_send = {
                 let mut guard = live_session()
                     .lock()
@@ -5725,6 +5751,7 @@ pub fn connect_or_update_live_voice_ext(
                 );
             }
         });
+        schedule(std::time::Duration::from_millis(120), send);
         return Ok(live_voice_rtc_status_json());
     }
 
@@ -13546,6 +13573,26 @@ mod dm_voice_stream_tests {
             "Voice connect on joined Game Room must succeed without 'Сервер в режиме просмотра', got {:?}",
             voice_res
         );
+    }
+
+    #[test]
+    fn voice_state_scheduler_sends_at_or_after_the_debounce_deadline() {
+        use std::time::{Duration, Instant};
+
+        let deadline_delay = Duration::from_millis(120);
+        let (sent, received) = std::sync::mpsc::sync_channel(1);
+        let started_at = Instant::now();
+        spawn_voice_state_update(
+            deadline_delay,
+            Box::new(move || {
+                let _ = sent.send(started_at.elapsed());
+            }),
+        );
+
+        let elapsed = received
+            .recv_timeout(Duration::from_secs(3))
+            .expect("scheduled voice update must run");
+        assert!(elapsed >= deadline_delay, "sent after {elapsed:?}");
     }
 
     #[test]

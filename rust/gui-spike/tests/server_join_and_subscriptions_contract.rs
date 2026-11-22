@@ -823,39 +823,30 @@ fn v1_voice_phases_signaling_negotiating_connected_120ms_coalescing_and_15s_phan
         "connected must be true once phase is 'connected'"
     );
 
-    // 4. Test 120ms coalescing for rapid mute/deaf toggles on the same channel:
+    // Drive all three scheduled updates without depending on a worker's wake-up time.
     data::clear_outbound_voice_op4_frames();
-    data::connect_or_update_live_voice(
-        Some(guild_id.to_string()),
-        Some(voice_channel_id.to_string()),
-        true,
-        false,
-    )
-    .unwrap();
-    data::connect_or_update_live_voice(
-        Some(guild_id.to_string()),
-        Some(voice_channel_id.to_string()),
-        false,
-        false,
-    )
-    .unwrap();
-    data::connect_or_update_live_voice(
-        Some(guild_id.to_string()),
-        Some(voice_channel_id.to_string()),
-        true,
-        true,
-    )
-    .unwrap();
-
-    // Immediately after rapid toggles (< 120ms), intermediate op:4 frames must be coalesced (0 sent yet)
-    assert_eq!(
-        data::outbound_voice_op4_frames().len(),
-        0,
-        "Rapid mute/deaf toggles within 120ms must be coalesced and not sent immediately"
+    let mut scheduled = Vec::new();
+    for (mute, deaf) in [(true, false), (false, false), (true, true)] {
+        data::connect_or_update_live_voice_ext_with_scheduler(
+            Some(guild_id.to_string()),
+            Some(voice_channel_id.to_string()),
+            mute,
+            deaf,
+            false,
+            false,
+            |delay, send| scheduled.push((delay, send)),
+        )
+        .expect("voice mute/deaf update must succeed");
+    }
+    assert!(
+        data::outbound_voice_op4_frames().is_empty(),
+        "Mute/deaf updates must be deferred"
     );
-
-    // Wait for the 120ms coalescing window to elapse
-    std::thread::sleep(Duration::from_millis(160));
+    assert_eq!(scheduled.len(), 3, "Each changed state must schedule an update");
+    for (delay, send) in scheduled {
+        assert_eq!(delay, Duration::from_millis(120));
+        send();
+    }
     let coalesced_frames = data::outbound_voice_op4_frames();
     assert_eq!(
         coalesced_frames.len(),
