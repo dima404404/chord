@@ -95,7 +95,7 @@ def required_tools():
     tools = {"Cargo": require_tool("Cargo", os.environ.get("CARGO", "cargo")),
              "rustc": require_tool("rustc", os.environ.get("RUSTC", "rustc"))}
     for tool in ("clang", "clang++", "ld.lld", "llvm-ar", "pkg-config", "node", "readelf",
-                 "dpkg-deb", "unsquashfs", "ar", "tar", "gzip", "flock", "git"):
+                 "dpkg-deb", "unsquashfs", "file", "ar", "tar", "gzip", "flock", "git"):
         tools[tool] = require_tool(tool)
     return tools
 
