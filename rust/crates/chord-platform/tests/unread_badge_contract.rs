@@ -8,7 +8,7 @@
 //! - Платформенные payload'ы: Linux Unity D-Bus signal (`emit_signal`), Windows Taskbar overlay icon (16x16 RGBA), macOS Dock badge
 //! - Отказоустойчивость при недоступном бэкенде
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::thread;
 
@@ -151,26 +151,30 @@ fn r4_03_linux_unity_dbus_signal_wire_emission() {
     let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
 
     let server_handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        // 1. Читаем NUL + AUTH EXTERNAL <hex> + NEGOTIATE_UNIX_FD + BEGIN
-        let mut buf = [0u8; 512];
-        let mut collected = Vec::new();
-        loop {
-            let n = stream.read(&mut buf).unwrap();
-            assert!(n > 0);
-            collected.extend_from_slice(&buf[..n]);
-            let text = String::from_utf8_lossy(&collected);
-            if text.contains("AUTH EXTERNAL") && !text.contains("NEGOTIATE_UNIX_FD") {
-                stream.write_all(b"OK 1234567890abcdef\r\n").unwrap();
-            } else if text.contains("NEGOTIATE_UNIX_FD") && !text.contains("BEGIN") {
-                stream.write_all(b"AGREE_UNIX_FD\r\n").unwrap();
-            } else if text.contains("BEGIN\r\n") {
-                break;
-            }
-        }
+        let (stream, _) = listener.accept().unwrap();
+        // Keep the same reader for the handshake and binary data. On a stream, BEGIN
+        // and the first message can arrive in a single read.
+        let mut stream = BufReader::new(stream);
+        let mut command = Vec::new();
+        stream.read_until(b'\n', &mut command).unwrap();
+        assert!(command.starts_with(b"\0AUTH EXTERNAL "));
+        assert!(command.ends_with(b"\r\n"));
+        stream
+            .get_mut()
+            .write_all(b"OK 1234567890abcdef\r\n")
+            .unwrap();
 
-        // 2. Читаем Hello MethodCall и отвечаем MethodReturn(":1.42")
-        let read_msg = |s: &mut UnixStream| -> message::Message {
+        command.clear();
+        stream.read_until(b'\n', &mut command).unwrap();
+        assert_eq!(command, b"NEGOTIATE_UNIX_FD\r\n");
+        stream.get_mut().write_all(b"AGREE_UNIX_FD\r\n").unwrap();
+
+        command.clear();
+        stream.read_until(b'\n', &mut command).unwrap();
+        assert_eq!(command, b"BEGIN\r\n");
+
+        // Read Hello and reply with a unique bus name.
+        let read_msg = |s: &mut BufReader<UnixStream>| -> message::Message {
             let mut hdr = [0u8; 16];
             s.read_exact(&mut hdr).unwrap();
             let body_len = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]) as usize;
@@ -196,7 +200,7 @@ fn r4_03_linux_unity_dbus_signal_wire_emission() {
             &[Value::String(":1.42".to_string())],
         )
         .unwrap();
-        stream.write_all(&reply_bytes).unwrap();
+        stream.get_mut().write_all(&reply_bytes).unwrap();
 
         // 3. Принимаем 3 сигнала: Numeric(4), OverflowDot, Cleared(0)
         let sig1 = read_msg(&mut stream);

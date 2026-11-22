@@ -5683,8 +5683,10 @@ pub fn connect_or_update_live_voice_ext(
         let gid_for_timer = clean_gid.clone();
         let cid_for_timer = clean_cid.clone();
         let uid_for_timer = self_uid.clone();
+        // Measure the debounce window from the update, including thread startup.
+        let send_deadline = std::time::Instant::now() + std::time::Duration::from_millis(120);
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(120));
+            std::thread::sleep(send_deadline.saturating_duration_since(std::time::Instant::now()));
             let should_send = {
                 let mut guard = live_session()
                     .lock()
