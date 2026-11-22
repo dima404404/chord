@@ -60,9 +60,13 @@ fn k03_master_key_manager_derives_from_keyring_secret_and_hardware_salt() {
     let key2 = manager
         .derive_or_create_master_key("chord-db", "user-1", hw_salt)
         .expect("load and derive");
+    let other_key = manager
+        .derive_or_create_master_key("chord-db", "user-2", hw_salt)
+        .expect("create and derive for another account");
 
     assert_eq!(key1.as_bytes(), key2.as_bytes());
     assert_ne!(key1.as_bytes(), &[0u8; 32]);
+    assert_ne!(key1.as_bytes(), other_key.as_bytes());
 }
 
 #[test]

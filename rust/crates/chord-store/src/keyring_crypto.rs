@@ -9,8 +9,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::fs::File;
-use std::io::Read;
 use std::sync::Mutex;
 use std::sync::atomic::{Ordering, compiler_fence};
 
@@ -245,11 +243,9 @@ impl<P: SecretServiceProvider> MasterKeyManager<P> {
 }
 
 fn generate_csprng_key_256() -> Result<Vec<u8>, KeyringError> {
-    let mut file = File::open("/dev/urandom")
-        .map_err(|err| KeyringError::Io(format!("open /dev/urandom: {err}")))?;
     let mut buf = vec![0u8; 32];
-    file.read_exact(&mut buf)
-        .map_err(|err| KeyringError::Io(format!("read /dev/urandom: {err}")))?;
+    getrandom::fill(&mut buf)
+        .map_err(|err| KeyringError::Io(format!("OS entropy unavailable: {err}")))?;
     if buf.iter().all(|&b| b == 0) {
         return Err(KeyringError::Backend(
             "CSPRNG returned all-zero key".to_owned(),
