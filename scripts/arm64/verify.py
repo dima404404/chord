@@ -57,6 +57,25 @@ def elf_headers(path):
         return segments
 
 
+def validate_relro_mapping(segments):
+    """Check the pages that the glibc loader will protect after relocation."""
+    relro = next(segment for segment in segments if segment[0] == 0x6474E552)
+    start = relro[3]
+    end = start + relro[6]
+    if end % 16384:
+        raise IntegrityError("GNU_RELRO must end on a 16 KiB page boundary")
+    loads = [segment for segment in segments if segment[0] == 1 and segment[1] & 2]
+    for page_size in (4096, 16384):
+        mapped_end = start // page_size * page_size
+        for load in sorted(loads, key=lambda segment: segment[3]):
+            load_start = load[3] // page_size * page_size
+            load_end = (load[3] + load[6] + page_size - 1) // page_size * page_size
+            if load_start <= mapped_end < load_end:
+                mapped_end = load_end
+        if mapped_end < end:
+            raise IntegrityError(f"GNU_RELRO includes unmapped {page_size // 1024} KiB pages")
+
+
 def validate_elf(path, gui=True):
     segments = elf_headers(path)
     if not gui:
@@ -79,6 +98,7 @@ def validate_elf(path, gui=True):
     details = command_output(["readelf", "--wide", "--dynamic", "--notes", path]).decode()
     if not re.search(r"BIND_NOW|FLAGS[^\n]*NOW", details) or "Build ID:" not in details:
         raise IntegrityError("ELF requires BIND_NOW and a linker Build ID")
+    validate_relro_mapping(segments)
     return {"elf_class": "ELF64", "elf_machine": "EM_AARCH64", "elf_machine_id": 183,
             "interpreter": interpreter, "page_size_bytes": min(loads), "full_relro": True}
 
@@ -213,7 +233,8 @@ def verify_release(directory, version, runtime, pins):
         raise IntegrityError("provenance does not match binary/runtime content")
     if provenance.get("sbom_sha256") != sums["sbom.spdx.json"]:
         raise IntegrityError("provenance does not match the packaged SBOM")
-    return {**result, "status": "passed", "packaging_integrity": "passed", "native_validation": "not_run",
+    return {**result, "task_id": "TASK-990", "status": "passed",
+            "packaging_integrity": "passed", "native_validation": "not_run",
             "version": version, "target": "aarch64-unknown-linux-gnu", "artifacts": {
                 key: {"filename": name, "size_bytes": (directory / name).stat().st_size,
                       "sha256": sums[name]} for key, name in names.items()},

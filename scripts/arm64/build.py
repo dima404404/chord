@@ -30,6 +30,8 @@ PACKAGES = ["alsa", "fontconfig", "wayland-client", "xkbcommon", "xkbcommon-x11"
             "gtk+-3.0", "webkit2gtk-4.1", "glib-2.0", "gio-2.0", "gobject-2.0",
             "libsoup-3.0", "libsecret-1", "libpipewire-0.3", "enchant-2", "hunspell", "openssl"]
 PIN_PATH = ROOT / "packaging/arm64/toolchain-pins.json"
+LINK_OPTIONS = ("-fuse-ld=lld", "-Wl,--build-id=sha1", "-Wl,-z,relro,-z,now,-z,noexecstack",
+                "-Wl,-z,max-page-size=16384,-z,common-page-size=16384")
 
 
 class Parser(argparse.ArgumentParser):
@@ -94,7 +96,13 @@ def require_tool(name, command=None):
 def required_tools():
     tools = {"Cargo": require_tool("Cargo", os.environ.get("CARGO", "cargo")),
              "rustc": require_tool("rustc", os.environ.get("RUSTC", "rustc"))}
-    for tool in ("clang", "clang++", "ld.lld", "llvm-ar", "pkg-config", "node", "readelf",
+    rustc = tools["rustc"]
+    host = next(line.removeprefix("host: ") for line in command_output([rustc, "-vV"]).decode().splitlines()
+                if line.startswith("host: "))
+    sysroot = Path(command_output([rustc, "--print", "sysroot"]).decode().strip())
+    linker = sysroot / "lib" / "rustlib" / host / "bin" / "gcc-ld" / "ld.lld"
+    tools["ld.lld"] = require_tool("Rust toolchain LLD", str(linker))
+    for tool in ("clang", "clang++", "llvm-ar", "pkg-config", "node", "readelf",
                  "dpkg-deb", "unsquashfs", "file", "ar", "tar", "gzip", "flock", "git"):
         tools[tool] = require_tool(tool)
     return tools
@@ -154,7 +162,9 @@ def cross_environment(args, tools):
               "CXXFLAGS_aarch64_unknown_linux_gnu": shlex.join(flags),
               "BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu": shlex.join(flags[:2]),
               "PKG_CONFIG_ALLOW_CROSS": "1", "PKG_CONFIG_SYSROOT_DIR": str(sysroot),
-              "PKG_CONFIG_LIBDIR": directories, "PKG_CONFIG_PATH": ""}
+              "PKG_CONFIG_LIBDIR": directories, "PKG_CONFIG_PATH": "",
+              # Clang finds the Rust toolchain's LLD before its bundled system linker.
+              "COMPILER_PATH": str(Path(tools["ld.lld"]).parent)}
     return values, flags
 
 
@@ -166,20 +176,23 @@ def check_sdk(args, tools, env, flags, work):
                             env=env, capture_output=True, text=True)
     if result.returncode:
         raise EnvironmentFailure(f"ARM64 development libraries are unavailable: {result.stderr.strip()}")
+    selected = command_output([tools["clang"], "--print-prog-name=ld.lld"], env=env).decode().strip()
+    if Path(selected) != Path(tools["ld.lld"]):
+        raise EnvironmentFailure(f"Clang selected {selected}, expected Rust toolchain LLD")
     source, binary = work / "sdk-probe.cpp", work / "sdk-probe"
     source.write_text('#include <string>\nint main() { return std::string("chord").empty(); }\n')
-    result = subprocess.run([tools["clang++"], *flags, "-fuse-ld=lld", str(source), "-o", str(binary),
+    result = subprocess.run([tools["clang++"], *flags, *LINK_OPTIONS, str(source), "-o", str(binary),
                              *shlex.split(result.stdout)], env=env, capture_output=True, text=True)
     if result.returncode:
         raise EnvironmentFailure(f"ARM64 C++ linker/sysroot probe failed: {result.stderr.strip()}")
-    validate_elf(binary, gui=False)
+    validate_elf(binary)
+    if platform.machine() in ("aarch64", "arm64"):
+        subprocess.run([binary], env=env, check=True, timeout=10)
 
 
 def cargo_configuration(args, tools, values, flags):
     rustflags = []
-    for flag in [*flags[:2], "-fuse-ld=lld", "-Wl,--build-id=sha1",
-                 "-Wl,-z,relro,-z,now,-z,noexecstack",
-                 "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"]:
+    for flag in (*flags[:2], *LINK_OPTIONS):
         rustflags.extend(["-C", f"link-arg={flag}"])
     rustflags.extend(["-C", "target-feature=+neon,+crc,+aes,+sha2", "-C", f"target-cpu={CPUS[args.profile]}"])
     lines = ["# Generated for an actual locked Chord GUI build.", "[build]", f"target = {json.dumps(TARGET)}",
@@ -323,7 +336,7 @@ def source_identity():
             "gpui_gitlink": command_output(["git", "-C", ROOT, "rev-parse", "HEAD:gpui-kit"]).decode().strip()}
 
 
-def write_metadata(args, stage, command, identity, runtime, tool, artifact):
+def write_metadata(args, stage, command, identity, runtime, tool, artifact, linker):
     binary = stage / artifact_names(args.version)["binary"]
     dynamic = command_output(["readelf", "--dynamic", binary]).decode()
     requirements = {"pkg_config_packages": PACKAGES, "bundled": False,
@@ -332,6 +345,7 @@ def write_metadata(args, stage, command, identity, runtime, tool, artifact):
                   "source": identity, "binary_sha256": sha256_file(binary),
                   "sbom_sha256": sha256_file(stage / "sbom.spdx.json"),
                   "cargo_reported_artifact": {key: artifact[key] for key in ("executable", "package_id", "fresh")},
+                  "linker_version": command_output([linker, "--version"]).decode().strip(),
                   "runtime_sha256": sha256_file(runtime), "appimagetool_sha256": sha256_file(tool),
                   "profile": args.profile, "target_cpu": CPUS[args.profile], "native_validation": "not_run",
                   "host_abi_requirements": requirements}
@@ -412,7 +426,7 @@ def build_release(args, pins):
         package_tar(args, stage, epoch)
         package_deb(args, stage, tools)
         package_appimage(args, stage, tool, runtime)
-        write_metadata(args, stage, command, identity, runtime, tool, artifact)
+        write_metadata(args, stage, command, identity, runtime, tool, artifact, tools['ld.lld'])
         report = verify_release(stage, args.version, runtime, pins)
         publish(args, stage)
         return report
