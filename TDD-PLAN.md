@@ -185,6 +185,7 @@ npm run check                            # Unified typecheck and full test pass
 | `tests/unit/arch-pkgbuild-964.test.mjs` | — | — |
 | `tests/unit/args.test.mjs` | `src/core/args.mjs` | `parseArgs`, `parseNumericArg`, `parseRegexArg` |
 | `tests/unit/arm64-build-integrity.test.mjs` | `scripts/build-arm64.sh` | — |
+| `tests/unit/arm64-candidate-integrity.test.mjs` | `scripts/arm64/build.py`, `scripts/arm64/verify.py`, `scripts/sbom.mjs` | — |
 | `tests/unit/arm64-packaging-990.test.mjs` | — | — |
 | `tests/unit/attachment-helper.test.mjs` | — | — |
 | `tests/unit/attachment-validator.test.mjs` | — | — |
