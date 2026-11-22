@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Client cache purge and local preferences reset (R6-06).
 //!
 //! Provides settings actions to purge the local SQLite message cache (freeing
@@ -8,7 +10,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use rusqlite::params;
+use rusqlite::{Transaction, params};
 
 use crate::Store;
 use crate::schema::{StoreError, map_rusqlite_error, validate_no_nul};
@@ -108,32 +110,7 @@ impl Store {
         let protected: HashSet<&str> = protected_keys.iter().copied().collect();
         let tx = self.conn.transaction().map_err(map_rusqlite_error)?;
 
-        let all_keys: Vec<String> = {
-            let mut stmt = tx
-                .prepare("SELECT key FROM kv")
-                .map_err(map_rusqlite_error)?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
-                .map_err(map_rusqlite_error)?;
-            let mut collected = Vec::new();
-            for row in rows {
-                collected.push(row.map_err(map_rusqlite_error)?);
-            }
-            collected
-        };
-
-        let mut keys_removed = 0usize;
-        let mut credentials_preserved = 0usize;
-
-        for key in &all_keys {
-            if protected.contains(key.as_str()) {
-                credentials_preserved += 1;
-            } else {
-                tx.execute("DELETE FROM kv WHERE key = ?1", params![key])
-                    .map_err(map_rusqlite_error)?;
-                keys_removed += 1;
-            }
-        }
+        let (keys_removed, credentials_preserved) = clear_unprotected_preferences(&tx, &protected)?;
 
         let mut defaults_restored = 0usize;
         for (key, val) in defaults {
@@ -164,6 +141,39 @@ impl Store {
     ) -> Result<PreferencesResetReport, StoreError> {
         self.reset_local_preferences_with_defaults(protected_keys, &[])
     }
+}
+
+fn clear_unprotected_preferences(
+    tx: &Transaction<'_>,
+    protected: &HashSet<&str>,
+) -> Result<(usize, usize), StoreError> {
+    let all_keys: Vec<String> = {
+        let mut stmt = tx
+            .prepare("SELECT key FROM kv")
+            .map_err(map_rusqlite_error)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(map_rusqlite_error)?;
+        let mut collected = Vec::new();
+        for row in rows {
+            collected.push(row.map_err(map_rusqlite_error)?);
+        }
+        collected
+    };
+
+    let mut keys_removed = 0usize;
+    let mut credentials_preserved = 0usize;
+
+    for key in &all_keys {
+        if protected.contains(key.as_str()) {
+            credentials_preserved += 1;
+        } else {
+            tx.execute("DELETE FROM kv WHERE key = ?1", params![key])
+                .map_err(map_rusqlite_error)?;
+            keys_removed += 1;
+        }
+    }
+    Ok((keys_removed, credentials_preserved))
 }
 
 /// Purges all temporary media thumbnail files inside `cache_dir` while
@@ -222,6 +232,8 @@ fn db_disk_usage(db_path: &Path) -> u64 {
     let main_bytes = fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
     let mut wal_os = db_path.as_os_str().to_os_string();
     wal_os.push("-wal");
-    let wal_bytes = fs::metadata(Path::new(&wal_os)).map(|m| m.len()).unwrap_or(0);
+    let wal_bytes = fs::metadata(Path::new(&wal_os))
+        .map(|m| m.len())
+        .unwrap_or(0);
     main_bytes.saturating_add(wal_bytes)
 }

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Мастер-ключ из Linux Keyring (`org.freedesktop.secrets`) и деривация ключа БД через Argon2id.
 //!
 //! Реализация без `unsafe` (`#![forbid(unsafe_code)]`):
@@ -268,85 +270,16 @@ pub fn argon2id_derive(
     let lane_len = (params.memory_kib / (4 * lanes)) * 4;
     let lane_len = lane_len.max(8) as usize;
     let mem_blocks = lane_len * (lanes as usize);
-    let seg_len = lane_len / 4;
 
-    let h0 = argon2_h0(
-        lanes,
-        params.output_len as u32,
-        params.memory_kib,
-        params.iterations,
-        2, // Argon2id
-        password,
-        salt,
-    );
+    let h0 = argon2_h0(params, password, salt);
 
     let mut memory = vec![[0u64; 128]; mem_blocks];
-
-    for lane in 0..(lanes as usize) {
-        for idx in 0..2 {
-            let mut input = Vec::with_capacity(72);
-            input.extend_from_slice(&h0);
-            input.extend_from_slice(&(idx as u32).to_le_bytes());
-            input.extend_from_slice(&(lane as u32).to_le_bytes());
-            let block_bytes = blake2b_long(&input, 1024);
-            memory[lane * lane_len + idx] = bytes_to_block(&block_bytes);
-        }
-    }
+    initialize_argon2_lanes(&mut memory, lane_len, &h0);
 
     for pass in 0..params.iterations {
-        for slice in 0..4u32 {
-            for lane in 0..(lanes as usize) {
-                let start_idx = if pass == 0 && slice == 0 { 2 } else { 0 };
-                for idx in start_idx..seg_len {
-                    let cur_offset = (slice as usize) * seg_len + idx;
-                    let cur_pos = lane * lane_len + cur_offset;
-                    let prev_offset = if cur_offset == 0 {
-                        lane_len - 1
-                    } else {
-                        cur_offset - 1
-                    };
-                    let prev_pos = lane * lane_len + prev_offset;
-
-                    let (j1, j2) = if pass == 0 && slice < 2 {
-                        let r = argon2i_index(
-                            pass,
-                            lane as u32,
-                            slice,
-                            mem_blocks as u32,
-                            params.iterations,
-                            idx,
-                        );
-                        (r as u32, (r >> 32) as u32)
-                    } else {
-                        let w = memory[prev_pos][0];
-                        (w as u32, (w >> 32) as u32)
-                    };
-
-                    let ref_lane = if pass == 0 && slice == 0 {
-                        lane
-                    } else {
-                        (j2 as usize) % (lanes as usize)
-                    };
-                    let ref_index = index_alpha(
-                        pass,
-                        slice,
-                        idx,
-                        lane_len,
-                        seg_len,
-                        ref_lane == lane,
-                        j1,
-                    );
-                    let ref_pos = ref_lane * lane_len + ref_index;
-
-                    let next = compress_blocks(&memory[prev_pos], &memory[ref_pos]);
-                    if pass == 0 {
-                        memory[cur_pos] = next;
-                    } else {
-                        for k in 0..128 {
-                            memory[cur_pos][k] ^= next[k];
-                        }
-                    }
-                }
+        for slice in 0..4 {
+            for lane in 0..lanes as usize {
+                fill_argon2_segment(&mut memory, lane_len, params.iterations, pass, slice, lane);
             }
         }
     }
@@ -354,9 +287,7 @@ pub fn argon2id_derive(
     let mut final_block = memory[lane_len - 1];
     for lane in 1..(lanes as usize) {
         let last = &memory[lane * lane_len + (lane_len - 1)];
-        for k in 0..128 {
-            final_block[k] ^= last[k];
-        }
+        xor_block(&mut final_block, last);
     }
 
     let final_bytes = block_to_bytes(&final_block);
@@ -370,29 +301,87 @@ pub fn argon2id_derive(
     Ok(DerivedKey::from_bytes(out))
 }
 
-fn argon2_h0(
-    lanes: u32,
-    tag_len: u32,
-    memory_kib: u32,
+fn initialize_argon2_lanes(memory: &mut [[u64; 128]], lane_len: usize, h0: &[u8; 64]) {
+    for lane in 0..memory.len() / lane_len {
+        for idx in 0..2 {
+            let mut input = Vec::with_capacity(72);
+            input.extend_from_slice(h0);
+            input.extend_from_slice(&(idx as u32).to_le_bytes());
+            input.extend_from_slice(&(lane as u32).to_le_bytes());
+            let block_bytes = blake2b_long(&input, 1024);
+            memory[lane * lane_len + idx] = bytes_to_block(&block_bytes);
+        }
+    }
+}
+
+fn fill_argon2_segment(
+    memory: &mut [[u64; 128]],
+    lane_len: usize,
     iterations: u32,
-    argon_type: u32,
-    password: &[u8],
-    salt: &[u8],
-) -> [u8; 64] {
+    pass: u32,
+    slice: u32,
+    lane: usize,
+) {
+    let lanes = memory.len() / lane_len;
+    let seg_len = lane_len / 4;
+    let start_idx = if pass == 0 && slice == 0 { 2 } else { 0 };
+    for idx in start_idx..seg_len {
+        let cur_offset = (slice as usize) * seg_len + idx;
+        let cur_pos = lane * lane_len + cur_offset;
+        let prev_offset = cur_offset.checked_sub(1).unwrap_or(lane_len - 1);
+        let prev_pos = lane * lane_len + prev_offset;
+
+        let index = if pass == 0 && slice < 2 {
+            argon2i_index(
+                pass,
+                lane as u32,
+                slice,
+                memory.len() as u32,
+                iterations,
+                idx,
+            )
+        } else {
+            memory[prev_pos][0]
+        };
+        let j1 = index as u32;
+        let j2 = (index >> 32) as usize;
+        let ref_lane = if pass == 0 && slice == 0 {
+            lane
+        } else {
+            j2 % lanes
+        };
+        let ref_index = index_alpha(pass, slice, idx, lane_len, seg_len, ref_lane == lane, j1);
+        let ref_pos = ref_lane * lane_len + ref_index;
+
+        let mut next = compress_blocks(&memory[prev_pos], &memory[ref_pos]);
+        if pass != 0 {
+            xor_block(&mut next, &memory[cur_pos]);
+        }
+        memory[cur_pos] = next;
+    }
+}
+
+fn xor_block(block: &mut [u64; 128], other: &[u64; 128]) {
+    for (word, other_word) in block.iter_mut().zip(other) {
+        *word ^= other_word;
+    }
+}
+
+fn argon2_h0(params: &Argon2idParams, password: &[u8], salt: &[u8]) -> [u8; 64] {
     let mut buf = Vec::with_capacity(40 + password.len() + salt.len());
-    buf.extend_from_slice(&lanes.to_le_bytes());
-    buf.extend_from_slice(&tag_len.to_le_bytes());
-    buf.extend_from_slice(&memory_kib.to_le_bytes());
-    buf.extend_from_slice(&iterations.to_le_bytes());
+    buf.extend_from_slice(&params.parallelism.to_le_bytes());
+    buf.extend_from_slice(&(params.output_len as u32).to_le_bytes());
+    buf.extend_from_slice(&params.memory_kib.to_le_bytes());
+    buf.extend_from_slice(&params.iterations.to_le_bytes());
     buf.extend_from_slice(&0x13u32.to_le_bytes()); // Argon2 v1.3
-    buf.extend_from_slice(&argon_type.to_le_bytes());
+    buf.extend_from_slice(&2u32.to_le_bytes()); // Argon2id
     buf.extend_from_slice(&(password.len() as u32).to_le_bytes());
     buf.extend_from_slice(password);
     buf.extend_from_slice(&(salt.len() as u32).to_le_bytes());
     buf.extend_from_slice(salt);
     buf.extend_from_slice(&0u32.to_le_bytes()); // secret len
     buf.extend_from_slice(&0u32.to_le_bytes()); // ad len
-    blake2b(&buf, 64).try_into().expect("64 bytes")
+    blake2b(&buf, 64)
 }
 
 fn blake2b_long(input: &[u8], out_len: usize) -> Vec<u8> {
@@ -401,7 +390,7 @@ fn blake2b_long(input: &[u8], out_len: usize) -> Vec<u8> {
     prefix.extend_from_slice(input);
 
     if out_len <= 64 {
-        return blake2b(&prefix, out_len);
+        return blake2b(&prefix, out_len)[..out_len].to_vec();
     }
 
     let mut out = Vec::with_capacity(out_len);
@@ -415,7 +404,7 @@ fn blake2b_long(input: &[u8], out_len: usize) -> Vec<u8> {
         remaining -= 32;
     }
     let tail = blake2b(&v, remaining);
-    out.extend_from_slice(&tail);
+    out.extend_from_slice(&tail[..remaining]);
     out
 }
 
@@ -585,7 +574,7 @@ const BLAKE2B_SIGMA: [[usize; 16]; 12] = [
     [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
 ];
 
-fn blake2b(input: &[u8], out_len: usize) -> Vec<u8> {
+fn blake2b(input: &[u8], out_len: usize) -> [u8; 64] {
     let mut h = BLAKE2B_IV;
     h[0] ^= 0x0101_0000 ^ (out_len as u64);
 
@@ -604,11 +593,10 @@ fn blake2b(input: &[u8], out_len: usize) -> Vec<u8> {
     last[..rem].copy_from_slice(&input[offset..]);
     blake2b_compress(&mut h, &last, t, true);
 
-    let mut out = Vec::with_capacity(out_len);
-    for &word in &h {
-        out.extend_from_slice(&word.to_le_bytes());
+    let mut out = [0u8; 64];
+    for (chunk, word) in out.chunks_exact_mut(8).zip(h) {
+        chunk.copy_from_slice(&word.to_le_bytes());
     }
-    out.truncate(out_len);
     out
 }
 

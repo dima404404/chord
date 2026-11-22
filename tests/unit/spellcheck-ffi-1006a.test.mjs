@@ -28,6 +28,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  copyFileSync,
+  cpSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -35,7 +37,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -68,6 +70,13 @@ let testBinPath = "";
  * @returns {{ status: number | null, stdout: string, stderr: string }}
  */
 function compileRustModuleTests(sourcePath, outputBin) {
+  const staging = mkdtempSync(join(workDir, "crate-"));
+  const moduleDir = dirname(RUST_MODULE_PATH);
+  copyFileSync(sourcePath, join(staging, "spellcheck.rs"));
+  copyFileSync(join(moduleDir, "ffi_hunspell.rs"), join(staging, "ffi_hunspell.rs"));
+  cpSync(join(moduleDir, "spellcheck"), join(staging, "spellcheck"), { recursive: true });
+  const crateRoot = join(staging, "lib.rs");
+  writeFileSync(crateRoot, "mod ffi_hunspell;\npub mod spellcheck;\n", "utf8");
   const res = spawnSync(
     "rustc",
     [
@@ -76,7 +85,7 @@ function compileRustModuleTests(sourcePath, outputBin) {
       "2024",
       "-D",
       "warnings",
-      sourcePath,
+      crateRoot,
       "-o",
       outputBin,
     ],
@@ -284,7 +293,7 @@ describe("TASK-1006A: Интеграция с системным словарё�
       0,
       `Тесты SUB-1006A-1 упали:\n${run.stdout}\n${run.stderr}`,
     );
-    assert.match(run.stdout, /test tests::test_sub_1006a_1_.*ok/);
+    assert.match(run.stdout, /test spellcheck::tests::test_sub_1006a_1_.*ok/);
   });
 
   it("SUB-1006A-2: проверяет метод check_word(word) -> bool с фильтрацией пунктуации, URL, e-mail, эмодзи <:name:id>/:shortcode:, @меншнов и поддержкой дефисов/апострофов", () => {
@@ -314,7 +323,7 @@ describe("TASK-1006A: Интеграция с системным словарё�
       0,
       `Тесты SUB-1006A-2 упали:\n${run.stdout}\n${run.stderr}`,
     );
-    assert.match(run.stdout, /test tests::test_sub_1006a_2_.*ok/);
+    assert.match(run.stdout, /test spellcheck::tests::test_sub_1006a_2_.*ok/);
   });
 
   it("SUB-1006A-3: проверяет метод suggest(word) -> Vec<String> с ограничением до 5 вариантов (MAX_SUGGESTIONS = 5), эвристикой Дамерау — Левенштейна, сменой локали и отсутствием утечек C-строк", () => {
@@ -346,7 +355,7 @@ describe("TASK-1006A: Интеграция с системным словарё�
       0,
       `Тесты SUB-1006A-3 упали:\n${run.stdout}\n${run.stderr}`,
     );
-    assert.match(run.stdout, /test tests::test_sub_1006a_3_.*ok/);
+    assert.match(run.stdout, /test spellcheck::tests::test_sub_1006a_3_.*ok/);
   });
 
   it("SUB-1006A-4: проверяет все 9 обязательных измерений TEST-POLICY.md (граничные Snowflake 0/u64::MAX, 2000 символов, 10 файлов/25 МБ, offset=9975, громкость 0..200%, бейдж 99+, HTTP 400..5xx, skeleton/202, права VIEW_CHANNEL/SEND_MESSAGES/AGE_GATED_SPACES, fallback-словарь и маскирование секретов)", () => {
@@ -372,7 +381,7 @@ describe("TASK-1006A: Интеграция с системным словарё�
       0,
       `Тесты SUB-1006A-4 упали:\n${run.stdout}\n${run.stderr}`,
     );
-    assert.match(run.stdout, /test tests::test_sub_1006a_4_.*ok/);
+    assert.match(run.stdout, /test spellcheck::tests::test_sub_1006a_4_.*ok/);
   });
 
   it("SUB-1006A-5: убивает 5/5 контрольных мутаций в rust/crates/chord-platform/src/spellcheck.rs (100% mutation kill rate)", () => {
