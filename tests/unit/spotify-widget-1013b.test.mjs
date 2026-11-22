@@ -87,6 +87,7 @@ test('TASK-1013B: 5/5 mutation kill rate on spotify_widget.rs', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'chord-spotify-mutations-'));
   const source = path.join(scratch, 'spotify_widget.rs');
   const binary = path.join(scratch, process.platform === 'win32' ? 'spotify-tests.exe' : 'spotify-tests');
+  /** @type {import("node:child_process").SpawnSyncOptionsWithStringEncoding} */
   const commandOptions = { cwd: scratch, encoding: 'utf8' };
 
   try {
