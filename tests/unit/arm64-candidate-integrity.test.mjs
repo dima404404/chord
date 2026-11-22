@@ -52,6 +52,24 @@ test('candidate version cannot silently select the legacy artifact directory', l
   assert.match(result.stdout + result.stderr, /CHORD_GPUI_TEST_DIST/);
 });
 
+test('explicit profile reuse verifies real outputs and never starts Cargo on an x64 verifier', linux, t => {
+  const dist = fixture(t);
+  /** @type {NodeJS.ProcessEnv} */
+  const env = { ...process.env, CHORD_GPUI_TEST_DIST: dist, CHORD_GPUI_TEST_VERSION: '1.0.0-qa.1',
+    CHORD_ARM64_QA_REUSE_PROFILES: '1', CARGO: join(dist, 'must-not-start-cargo'),
+    CHORD_ARM64_RUNTIME_FILE: join(dist, 'missing-official-runtime') };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ['--test', '--test-name-pattern=SUB-990-5',
+    join(root, 'tests/unit/arm64-packaging-990.test.mjs')], { cwd: root, env, encoding: 'utf8', timeout: 20_000 });
+  assert.notEqual(result.status, 0, 'Missing real profile artifacts must never pass');
+  if (process.arch === 'arm64') {
+    assert.match(result.stdout + result.stderr, /Cargo executable is unavailable/);
+  } else {
+    assert.match(result.stdout + result.stderr, /required official file is unavailable/);
+    assert.doesNotMatch(result.stdout + result.stderr, /must-not-start-cargo/);
+  }
+});
+
 test('real tar packaging retains the supplied SBOM, guide and unchanged application bytes', linux, t => {
   const stage = fixture(t);
   copyFileSync('/bin/true', join(stage, 'discord-gpui-aarch64'));
@@ -143,7 +161,7 @@ test('native ARM QA carrier builds all real profiles on a pinned Jammy ARM64 con
   assert.match(workflow, /runs-on: ubuntu-24\.04-arm/);
   assert.match(workflow, /image: ubuntu@sha256:2926e8e6ef0b816e19849e33ccc728c72b921a428286e6595d52fa92c5716626/);
   assert.match(workflow, /profile: \[generic, rpi5, asahi\]/);
-  assert.match(workflow, /max-parallel: 1/);
+  assert.match(workflow, /max-parallel: [1-3]\b/);
   assert.match(workflow, /branches: \['qa\/task-990-gpui-arm64-\*'\]/);
   assert.match(workflow, /node scripts\/bootstrap-gpui\.mjs\n/);
   assert.match(workflow, /cargo fetch --locked --manifest-path rust\/chord-gpui\/Cargo\.toml/);

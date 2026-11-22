@@ -39,6 +39,10 @@ export function verifyCandidateApplication(root, directory, profile) {
   for (const token of ['aarch64-unknown-linux-gnu', '--locked', 'chord-gpui']) assert.ok(provenance.cargo_command.includes(token));
   assert.equal(provenance.binary_sha256, digest(binary));
   assert.match(provenance.source.commit, /^[0-9a-f]{40}$/);
+  const ancestry = spawnSync('git', ['-C', root, 'merge-base', '--is-ancestor', provenance.source.commit, 'HEAD'], { encoding: 'utf8' });
+  assert.equal(ancestry.status, 0, 'The compiled source commit must be an ancestor of the verifying checkout');
+  const gpui = spawnSync(process.execPath, [join(root, 'scripts/bootstrap-gpui.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(gpui.status, 0, gpui.stderr);
   assert.match(provenance.cargo_reported_artifact.executable, /aarch64-unknown-linux-gnu\/release\/chord-gpui$/);
   const source = spawnSync('python3', ['-c',
     'import sys,json; sys.path.insert(0,sys.argv[1]); from build import source_identity; print(json.dumps(source_identity()))',
