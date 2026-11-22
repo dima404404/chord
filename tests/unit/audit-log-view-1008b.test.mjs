@@ -89,6 +89,19 @@ let testBinPath = "";
  * @returns {{ status: number | null, stdout: string, stderr: string }}
  */
 function compileRustModuleTests(sourcePath, outputBin) {
+  // Compile the actual sibling modules with their production namespace.
+  // Mutants replace only the view module; the canonical audit model stays unchanged.
+  const harnessPath = outputBin + ".rs";
+  const sibling = join(ROOT, "rust", "chord-gpui", "src", "guild", "audit_log.rs");
+  writeFileSync(harnessPath, [
+    "#![forbid(unsafe_code)]",
+    "pub mod guild {",
+    "#[path = " + JSON.stringify(sibling.replaceAll("\\", "/")) + "]",
+    "pub mod audit_log;",
+    "#[path = " + JSON.stringify(sourcePath.replaceAll("\\", "/")) + "]",
+    "pub mod audit_log_view;",
+    "}",
+  ].join("\n"));
   const res = spawnSync(
     "rustc",
     [
@@ -97,7 +110,7 @@ function compileRustModuleTests(sourcePath, outputBin) {
       "2024",
       "-D",
       "warnings",
-      sourcePath,
+      harnessPath,
       "-o",
       outputBin,
     ],
@@ -390,7 +403,7 @@ describe("TASK-1008B: Фильтруемый список аудита AuditLogV
       0,
       `Тест SUB-1008B-1 в Rust упал:\n${run.stdout}\n${run.stderr}`,
     );
-    assert.match(run.stdout, /test tests::test_sub_1008b_1_.*ok/);
+    assert.match(run.stdout, /test guild::audit_log_view::tests::test_sub_1008b_1_.*ok/);
   });
 
   it("SUB-1008B-2: проверяет элементы журнала аудита (иконка типа действия AuditActionIconSpec, ник модератора, описание события в паритете с audit-log.js и ISO время из Snowflake)", () => {
@@ -422,7 +435,7 @@ describe("TASK-1008B: Фильтруемый список аудита AuditLogV
       0,
       `Тест SUB-1008B-2 (элементы журнала, иконки событий, модератор, время) упал:\n${run.stdout}\n${run.stderr}`,
     );
-    assert.match(run.stdout, /test tests::test_sub_1008b_2_.*ok/);
+    assert.match(run.stdout, /test guild::audit_log_view::tests::test_sub_1008b_2_.*ok/);
   });
 
   it("SUB-1008B-3: проверяет выпадающие фильтры («Фильтр по действию» и «Фильтр по пользователю»), раскрытие деталей по клику с форматированным diff изменений и клавиатурную навигацию", () => {
@@ -451,7 +464,7 @@ describe("TASK-1008B: Фильтруемый список аудита AuditLogV
       0,
       `Тест SUB-1008B-3 (выпадающие фильтры и раскрытие diff по клику) упал:\n${run.stdout}\n${run.stderr}`,
     );
-    assert.match(run.stdout, /test tests::test_sub_1008b_3_.*ok/);
+    assert.match(run.stdout, /test guild::audit_log_view::tests::test_sub_1008b_3_.*ok/);
   });
 
   it("SUB-1008B-4: покрывает все 9 обязательных измерений TEST-POLICY.md (граничные Snowflake 0/u64::MAX, лимиты 1..100, 2000 символов, 10 файлов/25 МБ, offset=9975, громкость 0..200%, бейдж 99+, коды 400..5xx, пустой список аудита без падения, skeleton/202, права VIEW_AUDIT_LOG/AGE_GATED_SPACES и маскирование секретов)", () => {
@@ -463,7 +476,7 @@ describe("TASK-1008B: Фильтруемый список аудита AuditLogV
       0,
       `Тест SUB-1008B-4 (9 измерений TEST-POLICY.md) упал:\n${run.stdout}\n${run.stderr}`,
     );
-    assert.match(run.stdout, /test tests::test_sub_1008b_4_.*ok/);
+    assert.match(run.stdout, /test guild::audit_log_view::tests::test_sub_1008b_4_.*ok/);
   });
 
   it("SUB-1008B-5: убивает 5/5 контрольных мутаций модуля audit_log_view.rs (100% mutation kill rate: несрабатывание фильтра по действию, несрабатывание фильтра по пользователю, отказ раскрытия diff по клику, искажение состояния expanded diff, подмена стрелки диффа old/new)", () => {
@@ -523,14 +536,16 @@ describe("TASK-1008B: Фильтруемый список аудита AuditLogV
       writeFileSync(mutantSrcPath, mutant.mutatedSource, "utf8");
 
       const compiled = compileRustModuleTests(mutantSrcPath, mutantBinPath);
-      if (compiled.status !== 0) {
-        return { killed: true, reason: "compilation_error" };
-      }
+      assert.equal(compiled.status, 0,
+        "Mutant " + mutant.id + " must compile successfully:\n" + compiled.stderr);
       const run = runCompiledRustTests(mutantBinPath);
-      if (run.status !== 0) {
-        return { killed: true, reason: "test_assertion_failed" };
-      }
-      return { killed: false, reason: "mutant_survived" };
+      const failedInTest = run.status === 101 && /test result: FAILED\./m.test(run.stdout);
+      assert.ok(run.status === 0 || failedInTest,
+        "Mutant must reach its test assertions:\n" + run.stdout + run.stderr);
+      return {
+        killed: failedInTest,
+        reason: failedInTest ? "test_assertion_failed" : "mutant_survived",
+      };
     });
 
     const afterMd5 = createHash("md5")

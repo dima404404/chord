@@ -89,7 +89,7 @@ impl ChannelSidebar {
             .child(if let Some(guild) = selected_guild {
                 // Заголовок сервера с выпадающим шевроном
                 div()
-                    .size_full()
+                    .flex_1()
                     .flex()
                     .items_center()
                     .justify_between()
@@ -156,6 +156,22 @@ impl ChannelSidebar {
                     )
                     .into_any_element()
             })
+            .children(selected_guild.map(|_| {
+                div()
+                    .id("open-guild-audit-log")
+                    .px(px(6.))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .text_color(DISCORD_THEME.text_muted)
+                    .child("Журнал")
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.audit_log_panel.open(&this.state);
+                            cx.notify();
+                        }),
+                    )
+            }))
     }
 
     /// Навигация по разделу Личные сообщения (Друзья, Nitro, Список диалогов)

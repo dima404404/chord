@@ -3,6 +3,7 @@
 
 use crate::state::AppState;
 use crate::ui::account_switcher::AccountSwitcher;
+use crate::ui::audit_log_panel::AuditLogPanel;
 use crate::ui::captcha_modal::CaptchaModal;
 use crate::ui::channel_sidebar::ChannelSidebar;
 use crate::ui::chat_view::ChatView;
@@ -25,6 +26,7 @@ use gpui::*;
 
 pub struct AppLayout {
     pub state: AppState,
+    pub audit_log_panel: AuditLogPanel,
     pub focus_handle: FocusHandle,
 }
 
@@ -33,6 +35,7 @@ impl AppLayout {
         Self::start_background_event_loop(cx);
         Self {
             state: AppState::new_live(),
+            audit_log_panel: AuditLogPanel::default(),
             focus_handle: cx.focus_handle(),
         }
     }
@@ -47,6 +50,7 @@ impl AppLayout {
         state.attach_background_receiver(rx);
         Self {
             state,
+            audit_log_panel: AuditLogPanel::default(),
             focus_handle: cx.focus_handle(),
         }
     }
@@ -60,7 +64,8 @@ impl AppLayout {
                 timer.await;
                 let updated = this.update(cx, |layout, cx| {
                     let count = layout.state.poll_background_events();
-                    if count > 0 {
+                    let audit_changed = layout.audit_log_panel.poll(&layout.state);
+                    if count > 0 || audit_changed {
                         cx.notify();
                     }
                 });
@@ -85,6 +90,16 @@ impl Render for AppLayout {
                 }),
             )
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if this.audit_log_panel.is_open && this.audit_log_panel.matches_context(&this.state)
+                {
+                    if event.keystroke.key == "escape" {
+                        this.audit_log_panel.close();
+                    } else {
+                        this.audit_log_panel.viewer.handle_key(&event.keystroke.key);
+                    }
+                    cx.notify();
+                    return;
+                }
                 if event.keystroke.key == "escape" {
                     if this.state.handle_escape_key() {
                         cx.notify();
@@ -215,6 +230,14 @@ impl Render for AppLayout {
             } else {
                 None
             })
+            .children(
+                if self.audit_log_panel.is_open && self.audit_log_panel.matches_context(&self.state)
+                {
+                    Some(self.audit_log_panel.render(cx))
+                } else {
+                    None
+                },
+            )
             // 8. Контекстное меню сообщения
             .children(if self.state.active_context_menu.is_some() {
                 Some(ContextMenu::render(&self.state, window, cx))
