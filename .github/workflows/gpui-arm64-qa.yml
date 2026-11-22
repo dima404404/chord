@@ -28,7 +28,7 @@ jobs:
       image: ubuntu@sha256:2926e8e6ef0b816e19849e33ccc728c72b921a428286e6595d52fa92c5716626
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 3
       matrix:
         profile: [generic, rpi5, asahi]
     defaults:
@@ -127,11 +127,15 @@ jobs:
           node scripts/verify-system-requirements.mjs --binary "$ARM_QA_OUTPUT/discord-gpui-aarch64" \
             --out-json "$ARM_QA_OUTPUT/native-headless-system-report.json"
 
+      - name: Preserve builder file modes for verification
+        if: always() && steps.packages.outcome == 'success'
+        run: tar -cf "$RUNNER_TEMP/gpui-arm64-qa.tar" -C "$GITHUB_WORKSPACE/target/arm64-qa-dist" .
+
       - name: Upload genuine packages and provenance
         if: always() && steps.packages.outcome == 'success'
         uses: actions/upload-artifact@v6
         with:
           name: gpui-arm64-qa-${{ matrix.profile }}-${{ github.sha }}
-          path: target/arm64-qa-dist/
+          path: ${{ runner.temp }}/gpui-arm64-qa.tar
           if-no-files-found: error
           retention-days: 14
