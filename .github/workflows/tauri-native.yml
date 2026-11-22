@@ -1,4 +1,4 @@
-name: Tauri native builds
+name: Tauri Windows portable verification
 
 on:
   pull_request:
@@ -34,14 +34,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            platform: linux
-            node_arch: x64
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            platform: linux
-            node_arch: arm64
           - runner: windows-2025
             target: x86_64-pc-windows-msvc
             platform: windows
@@ -52,14 +44,6 @@ jobs:
             platform: windows
             node_arch: arm64
             triplet: arm64-windows
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            platform: macos
-            node_arch: x64
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            platform: macos
-            node_arch: arm64
     defaults:
       run:
         shell: bash
@@ -68,6 +52,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 3
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -88,30 +73,6 @@ jobs:
           node -e 'if (process.arch !== process.env.EXPECTED_ARCH) throw new Error(`Expected native ${process.env.EXPECTED_ARCH}, got ${process.arch}`); console.log({platform:process.platform, arch:process.arch})'
           rustc --version --verbose
           rustc --print cfg --target "${{ matrix.target }}"
-
-      - name: Linux Tauri libraries
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential clang pkg-config libsqlite3-dev libhunspell-dev \
-            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
-            libglib2.0-dev libsecret-1-dev libfontconfig-dev libwayland-dev \
-            libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev \
-            libasound2-dev libpipewire-0.3-dev libenchant-2-dev
-
-      - name: macOS Tauri libraries
-        if: matrix.platform == 'macos'
-        run: |
-          xcodebuild -version
-          xcrun --find clang
-          brew install hunspell sqlite glib libsecret pkg-config
-          tauriRustFlags="${RUSTFLAGS:-}"
-          for formula in hunspell sqlite glib libsecret; do
-            tauriRustFlags="$tauriRustFlags -L native=$(brew --prefix "$formula")/lib"
-          done
-          printf 'RUSTFLAGS=%s\n' "$tauriRustFlags" >> "$GITHUB_ENV"
-          printf 'PKG_CONFIG_PATH=%s/lib/pkgconfig:%s/lib/pkgconfig:%s\n' "$(brew --prefix glib)" "$(brew --prefix libsecret)" "${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Configure Windows package cache
         id: vcpkg_paths
@@ -151,6 +112,31 @@ jobs:
           "LIB=$tauriNativePrefix/lib;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TAURI_NATIVE_DLL_DIR=$tauriNativePrefix/bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "$tauriNativePrefix/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Reproduce the old binary's missing fixtures error
+        if: matrix.node_arch == 'x64'
+        env:
+          TAURI_TARGET: ${{ matrix.target }}
+          BASELINE_COMMIT: e464612b43fbc4510f28de3dbf5514915de7665d
+        run: |
+          source_file=rust/gui-spike/src/data.rs
+          saved_file=$(mktemp)
+          cp "$source_file" "$saved_file"
+          trap 'cp "$saved_file" "$source_file"' EXIT
+          git show "$BASELINE_COMMIT:$source_file" > "$source_file"
+          if cargo test --locked --manifest-path rust/gui-spike/Cargo.toml \
+            --target "$TAURI_TARGET" --features tauri/custom-protocol \
+            --test portable_data_contract -- --exact portable_session_loads_without_developer_fixtures \
+            > portable-regression-red.log 2>&1; then
+            tail -40 portable-regression-red.log
+            exit 1
+          fi
+          tail -45 portable-regression-red.log
+          grep -F 'live data must not require developer fixtures: NotFound' portable-regression-red.log
+
+      - name: Verify the login DOM and shell
+        run: |
+          node --test tests/unit/gui-spike-auth.test.mjs tests/unit/qr-auth-modal.test.mjs tests/unit/shell-bridge.test.mjs
 
       - name: Tauri release compilation
         id: tauri_build
@@ -242,8 +228,14 @@ jobs:
           writeFileSync(join(directory, 'SHA256SUMS'), Object.entries(files).map(([name, hash]) => `${hash}  ${name}\n`).join(''));
           JS
 
+      - name: Smoke-test the packaged WebView2 without fixtures
+        id: portable_smoke
+        env:
+          TAURI_TARGET: ${{ matrix.target }}
+        run: node .github/scripts/tauri-windows-portable-smoke.mjs
+
       - name: Upload Tauri build artifact
-        if: ${{ !cancelled() && steps.tauri_artifact.outcome == 'success' }}
+        if: ${{ success() && steps.portable_smoke.outcome == 'success' }}
         uses: actions/upload-artifact@v6
         with:
           name: tauri-${{ matrix.target }}
