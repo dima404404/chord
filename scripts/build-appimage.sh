@@ -163,7 +163,7 @@ if [[ ! -f "$APPRUN_SRC" || ! -f "$DESKTOP_SRC" || ! -f "$ICON_SVG_SRC" ]]; then
   exit 2
 fi
 
-for tool in python3 ldd sha256sum unsquashfs; do
+for tool in python3 ldd readelf sha256sum unsquashfs; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "build-appimage: обязательная системная утилита не найдена: $tool" >&2
     exit 2
@@ -267,6 +267,20 @@ usr_lib_dir = sys.argv[2]
 
 env = dict(os.environ)
 env["LC_ALL"] = "C"
+baseline_libraries = os.environ.get("CHORD_APPIMAGE_LIBRARY_DIR")
+if baseline_libraries:
+    if not os.path.isdir(baseline_libraries):
+        sys.exit(f"build-appimage: library directory does not exist: {baseline_libraries}")
+    env["LD_LIBRARY_PATH"] = os.path.abspath(baseline_libraries)
+
+def require_glibc_baseline(path):
+    versions = subprocess.check_output(["readelf", "--version-info", path], env=env, text=True)
+    needs = versions.partition("Version needs section")[2]
+    for major, minor in re.findall(r"Name: GLIBC_(\d+)\.(\d+)(?:\.\d+)?\s+Flags: none", needs):
+        if (int(major), int(minor)) > (2, 35):
+            sys.exit(f"build-appimage: {path} requires GLIBC_{major}.{minor}; use Ubuntu 22.04 libraries")
+
+require_glibc_baseline(binary_path)
 ldd_out = subprocess.check_output(["ldd", binary_path], env=env, text=True)
 
 # Базовые библиотеки ABI хоста (glibc, загрузчик, базовый звуковой/X11 сокетный транспорт),
@@ -320,6 +334,7 @@ for raw_line in ldd_out.splitlines():
         host_excluded.append({"name": name, "resolved_path": resolved or None})
         continue
 
+    require_glibc_baseline(resolved)
     dest_path = os.path.join(usr_lib_dir, name)
     shutil.copy2(resolved, dest_path)
     os.chmod(dest_path, 0o755)

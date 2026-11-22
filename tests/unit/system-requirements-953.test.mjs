@@ -128,6 +128,11 @@ describe("TASK-953: Автономная верификация системны
     assert.equal(evalInvalid.passed, false);
     assert.match(evalInvalid.reasons.join("; "), /GLIBC_2\.36/);
 
+    const libmRequiringC23 = validObjdumpSample.replace("0x00 22 GLIBC_2.35", "0x00 22 GLIBC_2.43");
+    const evalLibm = evaluateGlibcVersionReferences(libmRequiringC23, "2.35");
+    assert.equal(evalLibm.passed, false);
+    assert.match(evalLibm.reasons.join("; "), /libm\.so\.6.*GLIBC_2\.43/);
+
     // 4. Реальная инспекция релизного бинарника rust/dist/discord-gpui
     const liveGlibc = inspectBinaryGlibc(gpuiTestArtifact("discord-gpui"), "2.35");
     assert.equal(liveGlibc.passed, true, `Проверка GLIBC не прошла: ${liveGlibc.reasons.join("; ")}`);

@@ -137,3 +137,8 @@ The final argument must be a fresh directory. Set `CHORD_GPUI_TEST_DIST` to its
 `rust/dist` directory and `CHORD_GPUI_TEST_VERSION` to the same QA version for
 the package-contract tests. Run Arch's makepkg checks as an unprivileged Linux
 user. Set `APPIMAGE_EXTRACT_AND_RUN=1` for application startup in CI without FUSE.
+
+The AppImage ABI limit applies to every bundled library as well as the GUI.
+Packaging on a newer Linux host can pull in libraries requiring newer GLIBC
+symbols. Package on Ubuntu 22.04 or supply compatible libraries through
+`CHORD_APPIMAGE_LIBRARY_DIR`. Weak version requirements are tracked separately.

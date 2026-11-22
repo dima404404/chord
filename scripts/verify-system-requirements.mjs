@@ -201,7 +201,6 @@ export function evaluateGlibcVersionReferences(objdumpOutput, maxAllowedVersion 
       entry.library === "libm.so.6" && compareGlibcVersions(entry.version, "2.43") >= 0;
     if (isHostLibmC23) {
       hostLibmC23Set.add(entry.version);
-      continue;
     }
     if (entry.library === "libc.so.6" && compareGlibcVersions(entry.version, maxMandatoryLibcVersion) > 0) {
       maxMandatoryLibcVersion = entry.version;
