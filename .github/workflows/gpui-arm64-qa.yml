@@ -79,6 +79,8 @@ jobs:
           test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.35'
           node -e 'if (process.arch !== "arm64") throw new Error("Native ARM64 Node is required")'
           python3 -c 'import sys,tomllib,hashlib; assert sys.version_info >= (3,11) and callable(hashlib.file_digest)'
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           node scripts/bootstrap-gpui.mjs
           node scripts/bootstrap-gpui.mjs --check
           if [ "$ARM_QA_PROFILE" = generic ]; then
@@ -99,8 +101,8 @@ jobs:
         run: |
           runtimeUrl="$(python3 -c 'import json; print(json.load(open("packaging/arm64/toolchain-pins.json"))["runtime"]["asset_api_url"])')"
           toolUrl="$(python3 -c 'import json; print(json.load(open("packaging/arm64/toolchain-pins.json"))["appimagetool"]["assets"]["aarch64"]["asset_api_url"])')"
-          gh api --header 'Accept: application/octet-stream' "$runtimeUrl" > "$CHORD_ARM64_RUNTIME_FILE"
-          gh api --header 'Accept: application/octet-stream' "$toolUrl" > "$CHORD_ARM64_APPIMAGETOOL"
+          gh api --header 'Accept: application/octet-stream' "${runtimeUrl#https://api.github.com/}" > "$CHORD_ARM64_RUNTIME_FILE"
+          gh api --header 'Accept: application/octet-stream' "${toolUrl#https://api.github.com/}" > "$CHORD_ARM64_APPIMAGETOOL"
           python3 -c 'import json,sys,os; sys.path.insert(0,"scripts/arm64"); from verify import check_pinned_file; p=json.load(open("packaging/arm64/toolchain-pins.json")); check_pinned_file(os.environ["CHORD_ARM64_RUNTIME_FILE"],p["runtime"]); check_pinned_file(os.environ["CHORD_ARM64_APPIMAGETOOL"],p["appimagetool"]["assets"]["aarch64"])'
           chmod +x "$CHORD_ARM64_APPIMAGETOOL"
 
@@ -129,13 +131,13 @@ jobs:
 
       - name: Preserve builder file modes for verification
         if: always() && steps.packages.outcome == 'success'
-        run: tar -cf "$RUNNER_TEMP/gpui-arm64-qa.tar" -C "$GITHUB_WORKSPACE/target/arm64-qa-dist" .
+        run: tar -cf target/gpui-arm64-qa.tar -C "$GITHUB_WORKSPACE/target/arm64-qa-dist" .
 
       - name: Upload genuine packages and provenance
         if: always() && steps.packages.outcome == 'success'
         uses: actions/upload-artifact@v6
         with:
           name: gpui-arm64-qa-${{ matrix.profile }}-${{ github.sha }}
-          path: ${{ runner.temp }}/gpui-arm64-qa.tar
+          path: target/gpui-arm64-qa.tar
           if-no-files-found: error
           retention-days: 14
