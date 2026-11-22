@@ -7540,12 +7540,11 @@ pub fn resolve_root(configured: Option<&str>) -> PathBuf {
     }
 }
 
-/// Корень фикстур для команд: `DL_FIXTURES` или репозиторный `fixtures/`.
-/// Отсутствие каталога — `NotFound` с подсказкой про переменную окружения.
+/// Resolves the fixture path for data commands. Only offline reads require the directory.
 pub fn fixtures_root() -> Result<PathBuf, DataError> {
     let configured = std::env::var("DL_FIXTURES").ok();
     let root = resolve_root(configured.as_deref());
-    if !root.is_dir() {
+    if !is_live_active() && !root.is_dir() {
         return Err(DataError::not_found(
             "fixtures",
             format!(
@@ -7754,7 +7753,7 @@ fn read_json(path: &Path) -> Result<Value, DataError> {
 /// (nil-кадры дампа несут `"d": "nil"`, `"d": null` не встречается ни разу,
 /// поэтому `null` означает испорченный файл). Иначе `Parse` с путём и индексом:
 /// кадр без типа иначе молча терялся бы и давал ложный `NotFound`/пустую страницу.
-fn read_frames(root: &Path) -> Result<Vec<Frame>, DataError> {
+fn read_frames(root: &Path, allow_missing: bool) -> Result<Vec<Frame>, DataError> {
     let gateway = root.join("gateway");
     let dir = gateway.join("by-type");
     let entries = fs::read_dir(&dir).map_err(|error| {
@@ -7765,7 +7764,13 @@ fn read_frames(root: &Path) -> Result<Vec<Frame>, DataError> {
             return map_io(&gateway, &io::Error::from(io::ErrorKind::NotADirectory));
         }
         map_io(&dir, &error)
-    })?;
+    });
+    let entries = match entries {
+        Ok(entries) => entries,
+        // Portable clients can render the live session with no local capture files.
+        Err(DataError::NotFound { .. }) if allow_missing => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
     let mut paths: Vec<PathBuf> = entries
         .filter_map(|entry| match entry {
             Ok(entry) => Some(entry.path()),
@@ -9706,7 +9711,7 @@ pub(crate) fn channel_rows(root: &Path, channel_id: &str) -> Result<Vec<MessageR
     let mut frames = if live_active && live_ready.is_some() && root == default_fixtures_root() {
         Vec::new()
     } else {
-        read_frames(root)?
+        read_frames(root, live_active)?
     };
     if let Some(live_d) = live_ready {
         frames.push(Frame {
@@ -12265,13 +12270,13 @@ pub fn members_page(
     }
     ensure_input_len(guild_id, "guildId")?;
     let limit = page_limit(limit)?;
-    let mut frames = read_frames(root)?;
     let (live_active, live_ready_opt) = {
         let g = live_session()
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         (g.active, g.ready_data.clone())
     };
+    let mut frames = read_frames(root, live_active)?;
     if live_active {
         if let Some(live_d) = live_ready_opt {
             let _ = in_memory_cache().update_from_ready_value(&live_d);
@@ -12509,7 +12514,7 @@ struct CachedFtsFixtureIndex {
 }
 
 fn build_fixture_fts_index(root: &Path) -> Result<CachedFtsFixtureIndex, DataError> {
-    let frames = read_frames(root)?;
+    let frames = read_frames(root, false)?;
     let channels = channel_index(&frames);
     let mut channel_ids: Vec<String> = known_channels(&frames).into_iter().collect();
     channel_ids.sort();

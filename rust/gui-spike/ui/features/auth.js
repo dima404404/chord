@@ -47,85 +47,6 @@ export function parseRemoteAuthUserRecord(payload) {
   });
 }
 
-/**
- * Генерирует SVG-путь `<path d="...">` для матрицы QR-кода 160x160 (`size: 160` в `QR_CHUNK` 52423):
- * 3 поисковых паттерна 7x7, тайминг-линии, выравнивающий паттерн 5x5 и детерминированные модули данных.
- * @param {unknown} text
- * @returns {string}
- */
-export function buildQrSvgPath(text) {
-  const payload = typeof text === "string" && text.length > 0
-    ? text
-    : `${REMOTE_AUTH_QR_URL_PREFIX}unglv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0`;
-  const grid = 25;
-  const cell = 6;
-  const margin = 5;
-  const matrix = new Uint8Array(grid * grid);
-  const reserved = new Uint8Array(grid * grid);
-
-  /** @param {number} r0 @param {number} c0 */
-  const putFinder = (r0, c0) => {
-    for (let dr = -1; dr <= 7; dr++) {
-      for (let dc = -1; dc <= 7; dc++) {
-        const r = r0 + dr;
-        const c = c0 + dc;
-        if (r < 0 || r >= grid || c < 0 || c >= grid) continue;
-        const idx = r * grid + c;
-        reserved[idx] = 1;
-        const inOuter = dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6;
-        const onBorder = dr === 0 || dr === 6 || dc === 0 || dc === 6;
-        const inCore = dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4;
-        matrix[idx] = inOuter && (onBorder || inCore) ? 1 : 0;
-      }
-    }
-  };
-  putFinder(0, 0);
-  putFinder(0, grid - 7);
-  putFinder(grid - 7, 0);
-
-  // Timing patterns (row 6, col 6)
-  for (let i = 8; i < grid - 8; i++) {
-    reserved[6 * grid + i] = 1;
-    reserved[i * grid + 6] = 1;
-    matrix[6 * grid + i] = i % 2 === 0 ? 1 : 0;
-    matrix[i * grid + 6] = i % 2 === 0 ? 1 : 0;
-  }
-
-  // Alignment pattern 5x5 at (16, 16)
-  for (let dr = 0; dr < 5; dr++) {
-    for (let dc = 0; dc < 5; dc++) {
-      const idx = (16 + dr) * grid + (16 + dc);
-      reserved[idx] = 1;
-      matrix[idx] = dr === 0 || dr === 4 || dc === 0 || dc === 4 || (dr === 2 && dc === 2) ? 1 : 0;
-    }
-  }
-
-  // Fill data modules deterministically from payload bytes
-  let bitIdx = 0;
-  for (let r = 0; r < grid; r++) {
-    for (let c = 0; c < grid; c++) {
-      const idx = r * grid + c;
-      if (reserved[idx] === 1) continue;
-      const charCode = payload.charCodeAt(bitIdx % payload.length);
-      const shift = bitIdx % 8;
-      const mask = (r + c) % 2 === 0 ? 1 : 0;
-      matrix[idx] = (((charCode >> shift) & 1) ^ mask) === 1 ? 1 : 0;
-      bitIdx++;
-    }
-  }
-
-  let d = "";
-  for (let r = 0; r < grid; r++) {
-    for (let c = 0; c < grid; c++) {
-      if (matrix[r * grid + c] === 1) {
-        const x = margin + c * cell;
-        const y = margin + r * cell;
-        d += `M${x} ${y}h${cell}v${cell}h-${cell}z`;
-      }
-    }
-  }
-  return d;
-}
 const byId = (/** @type {string} */ id) => document.getElementById(id);
 const errText = (/** @type {unknown} */ err) => {
   if (typeof err === "string" || err instanceof Error) return AUTH_MESSAGES.offline;
@@ -175,14 +96,16 @@ export function createAuthGate(options = {}) {
   tokenBlock.append(summary, token, reveal, tokenSubmit);
   form.append(loginLabel, login, loginError, passLabel, password, passReveal, passError, forgot, submit, register, tokenBlock, restore, retry, error, status);
   col.append(title, form);
-  const qr = make("aside", "auth-qr"); qr.id = "auth-qr"; qr.append(make("h3", "", "Вход по QR-коду"), make("p", "", "Отсканируйте код в мобильном приложении, чтобы войти."));
-  const qrCode = make("div", "auth-qr-code"); qrCode.id = "auth-qr-code"; qrCode.setAttribute("role", "img"); qrCode.setAttribute("aria-label", "QR-код для входа");
-  const svgNs = "http://www.w3.org/2000/svg";
-  const svg = typeof document.createElementNS === "function" ? document.createElementNS(svgNs, "svg") : document.createElement("svg");
-  svg.setAttribute("width", "160"); svg.setAttribute("height", "160"); svg.setAttribute("viewBox", "0 0 160 160"); svg.setAttribute("aria-hidden", "true");
-  const qrRects = typeof document.createElementNS === "function" ? document.createElementNS(svgNs, "path") : document.createElement("path");
-  qrRects.setAttribute("d", buildQrSvgPath(`${REMOTE_AUTH_QR_URL_PREFIX}unglv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0`)); qrRects.setAttribute("fill", "currentColor"); svg.append(qrRects); qrCode.append(svg); qr.append(qrCode);
-  for (const [id, label, tip] of [["auth-qr-disabled", "QR-вход (Phase 3)", "QR-вход пока недоступен"], ["auth-passkey-disabled", "Или войдите с ключом доступа", "Ключ доступа пока недоступен"]]) { const b = make("button", "auth-link", label); b.id = id; b.type = "button"; b.setAttribute("aria-disabled", "true"); b.title = tip; qr.append(b); }
+  const qr = make("aside", "auth-qr");
+  qr.id = "auth-qr";
+  const qrUnavailable = make("p", "", "Вход по QR-коду пока недоступен в Chord.");
+  qrUnavailable.id = "auth-qr-unavailable";
+  const passkey = make("button", "auth-link", "Или войдите с ключом доступа");
+  passkey.id = "auth-passkey-disabled";
+  passkey.type = "button";
+  passkey.setAttribute("aria-disabled", "true");
+  passkey.title = "Ключ доступа пока недоступен";
+  qr.append(qrUnavailable, passkey);
   body.append(col, qr); card.append(body); gate.append(card);
   const captcha = make("section", "auth-captcha"); captcha.id = "auth-captcha"; captcha.setAttribute("role", "group"); captcha.setAttribute("aria-labelledby", "auth-captcha-title"); captcha.setAttribute("hidden", "");
   const captchaTitle = make("h3", "", "Проверка безопасности"); captchaTitle.id = "auth-captcha-title";

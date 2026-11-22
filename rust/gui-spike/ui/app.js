@@ -7549,11 +7549,6 @@ function boot() {
   const qrAuthModal = createQrAuthModal({
     document,
     container: document.body,
-    triggerButton: /** @type {HTMLElement | null} */ (
-      document.querySelector('[data-action="open-qr-auth-modal"]') ||
-      document.getElementById("auth-qr-code") ||
-      document.getElementById("auth-qr")
-    ),
     invoke: (cmd, args) => /** @type {Promise<any>} */ (invoke(cmd, args)),
   });
 

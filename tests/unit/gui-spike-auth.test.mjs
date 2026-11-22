@@ -2,7 +2,7 @@
 // RW-39 / NET-D2: окно входа по LOGIN-SPEC (AUTH-CONTRACT §1/§2/§4) на настоящем
 // `ui/app.js` в DOM-шиме. Проверяются: 7 состояний (`checking`, `no-session`,
 // `validating`, `captcha`, `mfa`, `ready`, `error`), раскладка 784/416/240/64/32,
-// QR-панель (inline-SVG + честный disabled), вход по логину/паролю и токену,
+// Статус доступности QR-входа, вход по логину/паролю и токену,
 // captcha только через интерактивный adapter, MFA (totp/sms/backup/password),
 // ошибки 401/429/captcha/сеть без секретов в DOM и логах.
 //
@@ -303,6 +303,7 @@ describe("auth-гейт: разметка и носитель (AUTH-CONTRACT §4
       "auth-mfa-code",
       "auth-error",
       "auth-qr",
+      "auth-qr-unavailable",
       "auth-logout",
     ];
     // В HTML живёт только носитель; id есть в рантайм-DOM (шин собирает app.js).
@@ -397,30 +398,32 @@ describe("auth-гейт: раскладка окна входа (LOGIN-SPEC §1,
       /\.auth-card\[data-qr="true"\]\s*\{[^}]*width:\s*480px/,
       "≤830 карточка возвращается к 480",
     );
-    assert.match(authCss, /\.auth-qr-code\s*\{[^}]*width:\s*176px/, "контейнер QR 176×176");
     assert.match(authCss, /\.auth-input\s*\{[^}]*height:\s*var\(--input-height\)/, "поле 40 = --input-height");
     assert.match(authCss, /\.auth-submit\s*\{[^}]*height:\s*var\(--btn-height-lg\)/, "кнопка 38 = --btn-height-lg");
   });
 
-  it("QR-панель: inline-SVG 160 без внешних ассетов, role=img, честный disabled", async () => {
-    await withAuth({}, async ({ env }) => {
+  it("QR sign-in is visibly unavailable and offers no code to scan", async () => {
+    await withAuth({ status: IDLE_EMPTY }, async ({ env }) => {
       const qr = byId(env, "auth-qr");
-      assert.equal(qr.getAttribute("hidden"), null, "QR-панель скрыта в no-session");
-      const code = byId(env, "auth-qr-code");
-      assert.equal(code.getAttribute("role"), "img", "QR-код должен быть role=img");
-      assert.match(code.getAttribute("aria-label") ?? "", /QR-код/i, "у QR нет доступного имени");
-      const svg = one(env, "#auth-qr-code svg");
-      assert.equal(svg.getAttribute("width"), "160", "QR-код должен быть 160");
-      assert.equal(svg.getAttribute("height"), "160", "QR-код должен быть 160");
-      assert.equal(svg.getAttribute("aria-hidden"), "true", "декоративный SVG должен быть скрыт от AT");
-
-      for (const id of ["auth-qr-disabled", "auth-passkey-disabled"]) {
-        const button = byId(env, id);
-        assert.equal(button.getAttribute("aria-disabled"), "true", `#${id} должен быть честно disabled`);
-        assert.ok((button.getAttribute("title") ?? "").length > 0, `#${id} disabled без подсказки`);
-        assert.ok((button.textContent ?? "").trim().length > 0, `#${id} без подписи`);
+      assert.equal(qr.getAttribute("hidden"), null);
+      assert.equal(qr.getAttribute("aria-haspopup"), null);
+      assert.equal(
+        byId(env, "auth-qr-unavailable").textContent.trim(),
+        "Вход по QR-коду пока недоступен в Chord.",
+      );
+      for (const tag of ["svg", "img", "canvas"]) {
+        assert.equal(qr.querySelector(tag), null, `QR panel renders a ${tag}`);
       }
-      assert.match(byId(env, "auth-qr-disabled").textContent, /QR-вход \(Phase 3\)/);
+      assert.equal(env.document.getElementById("auth-qr-code"), null);
+      assert.equal(env.document.getElementById("auth-qr-disabled"), null);
+      qr.click();
+      assert.equal(env.appModule?.currentApp?.()?.qrAuthModal.getState().state, "closed");
+      assert.deepEqual(env.invokeCalls.filter(({ cmd }) => cmd.startsWith("remote_auth_")), []);
+
+      const passkey = byId(env, "auth-passkey-disabled");
+      assert.equal(passkey.getAttribute("aria-disabled"), "true");
+      assert.ok((passkey.getAttribute("title") ?? "").length > 0);
+      assert.ok(passkey.textContent.trim().length > 0);
       // Ассеты не копируем: ни картинок, ни внешних URL.
       assert.equal(/<img\b/i.test(authJs), false, "в auth.js появился <img>");
       assert.equal(/https?:\/\//.test(authCss), false, "в auth.css внешние URL");
@@ -1368,7 +1371,6 @@ describe("auth-гейт: вход токеном, restore, logout, отсутс�
         "auth-forgot",
         "auth-password-reveal",
         "auth-passkey-disabled",
-        "auth-qr-disabled",
         "auth-register",
         "auth-restore",
         "auth-retry",

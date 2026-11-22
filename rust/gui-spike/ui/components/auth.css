@@ -171,8 +171,6 @@
 .auth-body { display: flex; align-items: center; gap: var(--space-13); }
 .auth-form-col { width: 416px; flex: 0 0 416px; }
 .auth-qr { width: 240px; flex: 0 0 240px; }
-.auth-qr-code { width: 176px; height: 176px; padding: 8px; display: grid; place-items: center; margin-bottom: var(--space-9); background: #ffffff; color: #111214; border-radius: 8px; }
-.auth-qr-code svg { width: 160px; height: 160px; }
 .auth-field-error { min-height: 16px; margin: 0; color: var(--danger-text); }
 .auth-link { display: block; color: var(--text-link); background: transparent; border: 0; }
 .auth-captcha, .auth-mfa { width: min(480px, 100%); padding: var(--space-9); border-radius: 8px; background: var(--surface-2); box-shadow: var(--shadow-popover); color: var(--text); display: flex; flex-direction: column; gap: var(--space-5); }

@@ -157,8 +157,8 @@ fn report_ui_snapshot(payload: String) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// BFF Phase 3 (W39e): local `fixtures/` inspection without network.
-// Root is configured via `DL_FIXTURES` or falls back to repository `fixtures/`.
+// BFF data commands use a live session or read local snapshots in offline mode.
+// Offline snapshots are read from `DL_FIXTURES` or the repository's `fixtures/`.
 // Errors are typed via `DataError` and serialized as `{kind, message, path?/resource?}`.
 // ---------------------------------------------------------------------------
 
