@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createCipheriv, createHmac } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -198,20 +198,27 @@ describe("LIB-SIMPLIFY-05: Comparative Spike Prototype (libdave C++ FFI vs Serei
   });
 
   it("SUB-501-3: kills 5/5 control mutations in rust/dave-spike (100% mutation kill rate)", () => {
-    const targetDir = join(SPIKE_DIR, "target");
-    /**
-     * Applies a temporary mutation in-place within an isolated copy or restores byte-for-byte in finally,
-     * Wait: to never touch the live workspace if interrupted, copy `rust/dave-spike` (excluding `target`) to tmpdir
-     * and reuse `CARGO_TARGET_DIR`!
-     */
     const scratchRoot = mkdtempSync(join(tmpdir(), "dave-spike-mut-"));
+    // Keep every mutation build separate from the unmodified crate's target directory.
+    const targetDir = join(scratchRoot, "target");
+    const manifest = join(scratchRoot, "Cargo.toml");
+    const runContract = () => spawnSync(
+      "cargo",
+      ["test", "--locked", "--offline", "--manifest-path", manifest, "--test", "comparative_spike_contract"],
+      {
+        cwd: scratchRoot,
+        encoding: "utf8",
+        env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+        timeout: 90_000,
+      },
+    );
+
     try {
-      const cpRes = spawnSync(
-        "cp",
-        ["-r", join(SPIKE_DIR, "Cargo.toml"), join(SPIKE_DIR, "Cargo.lock"), join(SPIKE_DIR, "build.rs"), join(SPIKE_DIR, "cpp"), join(SPIKE_DIR, "src"), join(SPIKE_DIR, "tests"), scratchRoot],
-        { encoding: "utf8" },
-      );
-      assert.equal(cpRes.status, 0, `cp to scratch failed: ${cpRes.stderr}`);
+      for (const item of ["Cargo.toml", "Cargo.lock", "build.rs", "cpp", "src", "tests"]) {
+        cpSync(join(SPIKE_DIR, item), join(scratchRoot, item), { recursive: true });
+      }
+      const baseline = runContract();
+      assert.equal(baseline.status, 0, "Scratch baseline failed:\n" + baseline.stdout + baseline.stderr);
 
       const mutants = [
         {
@@ -268,19 +275,17 @@ describe("LIB-SIMPLIFY-05: Comparative Spike Prototype (libdave C++ FFI vs Serei
           assert.ok(orig.includes(spec.target), `Mutation target missing in ${spec.file} for ${spec.id}`);
           writeFileSync(filePath, orig.replace(spec.target, spec.replacement), "utf8");
           try {
-            const res = spawnSync(
-              "cargo",
-              ["test", "--offline", "--manifest-path", join(scratchRoot, "Cargo.toml"), "--test", "comparative_spike_contract"],
-              {
-                cwd: scratchRoot,
-                encoding: "utf8",
-                env: { ...process.env, CARGO_TARGET_DIR: targetDir },
-                timeout: 90_000,
-              },
+            const res = runContract();
+            const failedInTest = res.status !== null
+              && res.status !== 0
+              && /test result: FAILED\./m.test(res.stdout ?? "");
+            assert.ok(
+              res.status === 0 || failedInTest,
+              "Mutation must reach its test assertions:\n" + res.stdout + res.stderr,
             );
             return {
-              killed: res.status !== 0,
-              reason: res.status !== 0 ? "test failed as expected" : "mutant survived",
+              killed: failedInTest,
+              reason: failedInTest ? "test failed as expected" : "mutant survived",
             };
           } finally {
             writeFileSync(filePath, orig, "utf8");
