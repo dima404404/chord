@@ -32,7 +32,9 @@ pub fn verify_voice_protocol_gate(version: u16, speaking_requested: bool, self_d
     return true;
 }
 
-use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicI32, AtomicU32};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// Global `AudioPipelineBridge` instance for cpal device enumeration, volume, and mute control.
@@ -67,14 +69,17 @@ static LAST_STREAM_START_MS: AtomicU64 = AtomicU64::new(0);
 
 /// PipeWire node id obtained from the last XDG Desktop Portal screencast session.
 /// `0` = not yet acquired.
+#[cfg(target_os = "linux")]
 static LAST_PIPEWIRE_NODE_ID: AtomicU32 = AtomicU32::new(0);
 
 /// PipeWire fd obtained from the last XDG Desktop Portal screencast session.
 /// `-1` = not yet acquired.
+#[cfg(target_os = "linux")]
 static LAST_PIPEWIRE_FD: AtomicI32 = AtomicI32::new(-1);
 
 /// Active XDG ScreenCast portal session; must remain alive for the duration of the stream,
 /// otherwise the portal destroys the PipeWire node after ~1.5 seconds.
+#[cfg(target_os = "linux")]
 static ACTIVE_PORTAL_SESSION: Mutex<
     Option<ashpd::desktop::Session<ashpd::desktop::screencast::Screencast>>,
 > = Mutex::new(None);
@@ -329,6 +334,7 @@ async fn blocking<T: Send + 'static>(
 }
 
 /// Acquires a PipeWire node id via the XDG Desktop Portal ScreenCast API on Wayland.
+#[cfg(target_os = "linux")]
 async fn acquire_pipewire_node_id() -> Result<(u32, i32), String> {
     if std::env::var("WAYLAND_DISPLAY").is_err() {
         return Err("not Wayland".to_string());
@@ -937,7 +943,9 @@ pub async fn voice_stream_start(
         LAST_STREAM_START_MS.store(now_ms, Ordering::SeqCst);
     }
 
+    #[cfg(target_os = "linux")]
     let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+    #[cfg(target_os = "linux")]
     let pipewire_info: Option<(u32, i32)> = if is_wayland
         || spec.source_id.is_empty()
         || spec.source_id.starts_with("screen")
@@ -963,6 +971,9 @@ pub async fn voice_stream_start(
     } else {
         None
     };
+
+    #[cfg(not(target_os = "linux"))]
+    let pipewire_info: Option<(u32, i32)> = None;
 
     let op18 = chord_client::voice_stage::build_gateway_stream_create_op18(&spec)?;
     let stream_key = blocking(move || {
@@ -994,13 +1005,17 @@ pub async fn voice_stream_start(
             } else {
                 "screen"
             };
-            let _ = std::fs::write("/dev/shm/discord_capture_target.txt", clean_src.as_bytes());
-            let _ = std::fs::write("/dev/shm/discord_capture_kick.bin", &[1u8]);
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::fs::write("/dev/shm/discord_capture_target.txt", clean_src.as_bytes());
+                let _ = std::fs::write("/dev/shm/discord_capture_kick.bin", &[1u8]);
+            }
             let ucmd = format!(
                 "{{\"cmd\":\"set_stream_source\",\"sourceType\":\"{target_kind}\",\"sourceId\":\"{clean_src}\"}}"
             );
             chord_core::ws::send_native_stream_cmd(&ucmd);
         }
+        #[cfg(target_os = "linux")]
         if let Some((nid, fd)) = pipewire_info {
             let _ = std::fs::write("/dev/shm/discord_capture_kick.bin", &[1u8]);
             let pid = std::process::id();
@@ -1072,11 +1087,14 @@ pub async fn voice_stream_stop(
     let k = key.clone();
     let _ = blocking(move || {
         chord_core::ws::clear_last_stream_key();
-        if let Ok(mut guard) = ACTIVE_PORTAL_SESSION.lock() {
-            *guard = None;
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(mut guard) = ACTIVE_PORTAL_SESSION.lock() {
+                *guard = None;
+            }
+            let _ = std::fs::remove_file("/dev/shm/discord_pipewire_fd.txt");
+            let _ = std::fs::remove_file("/dev/shm/discord_pipewire_fd.sock");
         }
-        let _ = std::fs::remove_file("/dev/shm/discord_pipewire_fd.txt");
-        let _ = std::fs::remove_file("/dev/shm/discord_pipewire_fd.sock");
         let (gid, cid) = data::current_live_voice_target();
         let (vmute, vdeaf) = data::current_live_voice_mute_deaf();
         let _ = data::connect_or_update_live_voice_ext(gid, cid, vmute, vdeaf, false, false);

@@ -1341,6 +1341,7 @@ pub fn format_iso8601_utc(unix_secs: i64) -> String {
 /// Подключает нативный `chord_platform::notifications::Notifier` по D-Bus
 /// и отправляет десктопное системное уведомление по спецификации freedesktop
 /// (STUB-28, N-01/N-02).
+#[cfg(unix)]
 pub fn send_desktop_notification(
     summary: &str,
     body: &str,
@@ -1368,4 +1369,14 @@ pub fn send_desktop_notification(
     notifier
         .notify_with_hints(&notif, &hints)
         .map_err(|e| format!("D-Bus notify error: {e:?}"))
+}
+
+/// Report unavailable D-Bus delivery on systems without its Unix transport.
+#[cfg(not(unix))]
+pub fn send_desktop_notification(
+    _summary: &str,
+    _body: &str,
+    _category: Option<&str>,
+) -> Result<u32, String> {
+    Err(chord_platform::UnsupportedCapability::new("D-Bus desktop notifications").to_string())
 }

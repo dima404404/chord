@@ -7,13 +7,19 @@
 #![allow(unsafe_code)]
 
 use std::fmt;
+#[cfg(unix)]
 use std::os::fd::RawFd;
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
-use crate::dbus::{BusAddress, Connection, DbusError, Value, fd};
+use crate::dbus::DbusError;
+#[cfg(unix)]
+use crate::dbus::{BusAddress, Connection, Value, fd};
 
 /// Имя D-Bus сервиса XDG Desktop Portal.
 pub const PORTAL_BUS_NAME: &str = "org.freedesktop.portal.Desktop";
@@ -102,6 +108,7 @@ pub enum PortalRequestError {
     /// Недопустимая маска типов источников.
     InvalidSourceTypes(u32),
     /// Невалидный файловый дескриптор PipeWire (`fd < 0`).
+    #[cfg(unix)]
     InvalidFd(RawFd),
     /// Портал не вернул потоков PipeWire в `Start`.
     EmptyStreams,
@@ -120,6 +127,7 @@ impl fmt::Display for PortalRequestError {
             Self::InvalidToken(t) => write!(f, "недопустимый токен портала: {t:?}"),
             Self::InvalidObjectPath(p) => write!(f, "недопустимый D-Bus путь: {p:?}"),
             Self::InvalidSourceTypes(m) => write!(f, "недопустимая маска типов источников: {m}"),
+            #[cfg(unix)]
             Self::InvalidFd(raw) => write!(f, "недопустимый файловый дескриптор PipeWire: {raw}"),
             Self::EmptyStreams => write!(f, "портал не вернул ни одного потока PipeWire"),
             Self::InvalidX11Display(d) => write!(f, "некорректная спецификация X11 DISPLAY: {d:?}"),
@@ -198,6 +206,7 @@ pub struct PortalStreamInfo {
 }
 
 /// Создаёт дубликат файлового дескриптора с атомарным флагом `FD_CLOEXEC` (`fcntl(F_DUPFD_CLOEXEC)`).
+#[cfg(unix)]
 fn dup_raw_fd(raw: RawFd) -> Result<RawFd, PortalRequestError> {
     if raw < 0 {
         return Err(PortalRequestError::InvalidFd(raw));
@@ -218,10 +227,12 @@ fn dup_raw_fd(raw: RawFd) -> Result<RawFd, PortalRequestError> {
 ///
 /// Гарантированно закрывает дескриптор через [`fd::close_fd`] при выходе из области видимости.
 #[derive(Debug)]
+#[cfg(unix)]
 pub struct OwnedPipeWireFd {
     raw: RawFd,
 }
 
+#[cfg(unix)]
 impl OwnedPipeWireFd {
     /// Проверяет, что `raw >= 0`, и оборачивает дескриптор в RAII-структуру.
     pub fn from_raw_fd_checked(raw: RawFd) -> Result<Self, PortalRequestError> {
@@ -244,6 +255,7 @@ impl OwnedPipeWireFd {
     }
 }
 
+#[cfg(unix)]
 impl Drop for OwnedPipeWireFd {
     fn drop(&mut self) {
         if self.raw >= 0 {
@@ -254,10 +266,12 @@ impl Drop for OwnedPipeWireFd {
 
 /// RAII-обёртка над дескриптором аппаратного буфера DMA-BUF из потока PipeWire.
 #[derive(Debug)]
+#[cfg(unix)]
 pub struct OwnedDmaBuf {
     raw: RawFd,
 }
 
+#[cfg(unix)]
 impl OwnedDmaBuf {
     /// Оборачивает проверенный дескриптор DMA-BUF (`raw >= 0`).
     pub fn from_raw_fd_checked(raw: RawFd) -> Result<Self, PortalRequestError> {
@@ -280,6 +294,7 @@ impl OwnedDmaBuf {
     }
 }
 
+#[cfg(unix)]
 impl Drop for OwnedDmaBuf {
     fn drop(&mut self) {
         if self.raw >= 0 {
@@ -288,12 +303,14 @@ impl Drop for OwnedDmaBuf {
     }
 }
 
+#[cfg(unix)]
 impl PartialEq for OwnedDmaBuf {
     fn eq(&self, other: &Self) -> bool {
         self.raw == other.raw
     }
 }
 
+#[cfg(unix)]
 impl Eq for OwnedDmaBuf {}
 
 /// Метаданные и буфер захваченного кадра (PipeWire DMA-BUF / MemFd или X11 SHM).
@@ -308,6 +325,7 @@ pub struct CapturedFrame {
     /// Код формата пикселей (FourCC или PipeWire SPA).
     pub format: u32,
     /// Разделяемый RAII-дескриптор DMA-BUF для аппаратного zero-copy импорта (EGL/VA-API).
+    #[cfg(unix)]
     pub dma_buf: Option<Arc<OwnedDmaBuf>>,
     /// DRM формат-модификатор (DRM modifier).
     pub drm_modifier: u64,
@@ -328,6 +346,7 @@ impl CapturedFrame {
             height,
             stride,
             format,
+            #[cfg(unix)]
             dma_buf: None,
             drm_modifier: 0,
             timestamp_us: 0,
@@ -338,6 +357,7 @@ impl CapturedFrame {
 
     /// Создаёт кадр на базе аппаратного буфера DMA-BUF (TASK-804 zero-copy).
     #[must_use]
+    #[cfg(unix)]
     pub fn new_dma_buf(
         width: u32,
         height: u32,
@@ -374,11 +394,12 @@ impl CapturedFrame {
     /// Проверяет, пуст ли кадр (нулевые размеры или отсутствие данных).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.width == 0 || self.height == 0 || (self.data.is_empty() && self.dma_buf.is_none())
+        self.width == 0 || self.height == 0 || (self.data.is_empty() && !self.is_dma_buf())
     }
 
     /// Возвращает дескриптор DMA-BUF (если передан аппаратный буфер).
     #[must_use]
+    #[cfg(unix)]
     pub fn dma_buf_raw_fd(&self) -> Option<RawFd> {
         self.dma_buf.as_ref().map(|b| b.as_raw_fd())
     }
@@ -386,7 +407,14 @@ impl CapturedFrame {
     /// Проверяет, является ли кадр аппаратно ускоренным буфером DMA-BUF.
     #[must_use]
     pub fn is_dma_buf(&self) -> bool {
-        self.dma_buf.is_some()
+        #[cfg(unix)]
+        {
+            self.dma_buf.is_some()
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
     }
 
     /// Возвращает размер буфера кадра в байтах.
@@ -748,12 +776,14 @@ pub fn parse_x11_display_spec(display: &str) -> Result<X11DisplaySpec, PortalReq
 }
 
 /// D-Bus клиент портала `org.freedesktop.portal.ScreenCast`.
+#[cfg(unix)]
 pub struct ScreenCastPortal {
     conn: Connection,
     dialog_timeout: Duration,
     cached_pipewire_remote: Option<(String, OwnedPipeWireFd)>,
 }
 
+#[cfg(unix)]
 impl ScreenCastPortal {
     /// Подключается к сессионной шине D-Bus с согласованием `NEGOTIATE_UNIX_FD`.
     pub fn connect_session() -> Result<Self, PortalRequestError> {
@@ -1160,6 +1190,7 @@ fn validate_token(token: &str) -> Result<(), PortalRequestError> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn validate_object_path(path: &str) -> Result<(), PortalRequestError> {
     if path == "/" {
         return Ok(());
@@ -1175,6 +1206,7 @@ fn validate_object_path(path: &str) -> Result<(), PortalRequestError> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn extract_object_path(reply: &[Value]) -> Result<String, PortalRequestError> {
     match reply.first() {
         Some(Value::String(path)) => {
@@ -1187,6 +1219,7 @@ fn extract_object_path(reply: &[Value]) -> Result<String, PortalRequestError> {
     }
 }
 
+#[cfg(unix)]
 fn unwrap_variant(val: &Value) -> &Value {
     match val {
         Value::Variant(inner) => inner.as_ref(),
@@ -1194,6 +1227,7 @@ fn unwrap_variant(val: &Value) -> &Value {
     }
 }
 
+#[cfg(unix)]
 fn lookup_dict_value<'a>(dict: &'a Value, key: &str) -> Option<&'a Value> {
     let Value::Dict(entries) = dict else {
         return None;
@@ -1208,6 +1242,7 @@ fn lookup_dict_value<'a>(dict: &'a Value, key: &str) -> Option<&'a Value> {
     None
 }
 
+#[cfg(unix)]
 fn lookup_dict_string(dict: &Value, key: &str) -> Option<String> {
     match lookup_dict_value(dict, key)? {
         Value::String(s) => Some(s.clone()),
@@ -1215,6 +1250,7 @@ fn lookup_dict_string(dict: &Value, key: &str) -> Option<String> {
     }
 }
 
+#[cfg(unix)]
 fn lookup_dict_u32(dict: &Value, key: &str) -> Option<u32> {
     match lookup_dict_value(dict, key)? {
         Value::U32(n) => Some(*n),
@@ -1222,6 +1258,7 @@ fn lookup_dict_u32(dict: &Value, key: &str) -> Option<u32> {
     }
 }
 
+#[cfg(unix)]
 fn lookup_dict_i32_pair(dict: &Value, key: &str) -> Option<(i32, i32)> {
     let Value::Struct(items) = lookup_dict_value(dict, key)? else {
         return None;
@@ -1566,6 +1603,7 @@ pub enum ScreenCastPipelineState {
 
 /// Полный конвейер захвата экрана и окон `org.freedesktop.portal.ScreenCast`
 /// с согласованием разрешения 60 FPS, контролем темпа кадров и тройной буферизацией.
+#[cfg(unix)]
 pub struct ScreenCastCapturePipeline {
     state: ScreenCastPipelineState,
     session_handle: Option<String>,
@@ -1580,6 +1618,7 @@ pub struct ScreenCastCapturePipeline {
     rtp_timestamp: u32,
 }
 
+#[cfg(unix)]
 impl ScreenCastCapturePipeline {
     /// Создаёт новый конвейер захвата экрана и окон в состоянии [`ScreenCastPipelineState::Idle`].
     #[must_use]
@@ -1830,6 +1869,7 @@ impl ScreenCastCapturePipeline {
     }
 }
 
+#[cfg(unix)]
 impl Default for ScreenCastCapturePipeline {
     fn default() -> Self {
         Self::new()
@@ -1927,6 +1967,7 @@ pub fn is_wayland_session() -> bool {
 
 /// Преобразует [`PortalSourceTypes`] во флаги `ashpd::desktop::screencast::SourceType`.
 #[must_use]
+#[cfg(unix)]
 pub fn to_ashpd_source_types(
     source_types: PortalSourceTypes,
 ) -> enumflags2::BitFlags<ashpd::desktop::screencast::SourceType> {
@@ -1949,6 +1990,7 @@ pub fn to_ashpd_source_types(
 
 /// Преобразует [`PortalCursorMode`] в `ashpd::desktop::screencast::CursorMode`.
 #[must_use]
+#[cfg(unix)]
 pub const fn to_ashpd_cursor_mode(
     mode: PortalCursorMode,
 ) -> ashpd::desktop::screencast::CursorMode {
@@ -1962,6 +2004,7 @@ pub const fn to_ashpd_cursor_mode(
 
 /// Преобразует [`PortalPersistMode`] в `ashpd::desktop::PersistMode`.
 #[must_use]
+#[cfg(unix)]
 pub const fn to_ashpd_persist_mode(mode: PortalPersistMode) -> ashpd::desktop::PersistMode {
     use ashpd::desktop::PersistMode;
     match mode {
@@ -1973,6 +2016,7 @@ pub const fn to_ashpd_persist_mode(mode: PortalPersistMode) -> ashpd::desktop::P
 
 /// Преобразует `ashpd::desktop::screencast::Stream` в [`PortalStreamInfo`].
 #[must_use]
+#[cfg(unix)]
 pub fn stream_info_from_ashpd(stream: &ashpd::desktop::screencast::Stream) -> PortalStreamInfo {
     use ashpd::desktop::screencast::SourceType;
     let source_type = match stream.source_type() {
@@ -1996,6 +2040,7 @@ pub fn stream_info_from_ashpd(stream: &ashpd::desktop::screencast::Stream) -> Po
 }
 
 /// Активная сессия Wayland PipeWire захвата экрана через `ashpd::desktop::screencast`.
+#[cfg(unix)]
 pub struct WaylandScreencastSession {
     session: ashpd::desktop::Session<ashpd::desktop::screencast::Screencast>,
     pipewire_fd: OwnedPipeWireFd,
@@ -2003,6 +2048,7 @@ pub struct WaylandScreencastSession {
     restore_token: Option<String>,
 }
 
+#[cfg(unix)]
 impl fmt::Debug for WaylandScreencastSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WaylandScreencastSession")
@@ -2013,6 +2059,7 @@ impl fmt::Debug for WaylandScreencastSession {
     }
 }
 
+#[cfg(unix)]
 impl WaylandScreencastSession {
     /// Открывает сессию `org.freedesktop.portal.ScreenCast` через `ashpd`,
     /// запрашивает источники и получает PipeWire remote fd.
@@ -2150,6 +2197,7 @@ impl WaylandScreencastSession {
     }
 }
 
+#[cfg(unix)]
 fn map_ashpd_error(err: ashpd::Error) -> PortalRequestError {
     match err {
         ashpd::Error::Response(ashpd::desktop::ResponseError::Cancelled) => {

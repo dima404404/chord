@@ -28,7 +28,7 @@ pub(crate) struct Hunhandle {
 
 // SAFETY: имена и сигнатуры совпадают с `/usr/include/hunspell/hunspell.h` 1.7.5;
 // линковка — системная `libhunspell-1.7`.
-#[link(name = "hunspell-1.7")]
+#[cfg_attr(not(target_env = "msvc"), link(name = "hunspell-1.7"))]
 unsafe extern "C" {
     #[link_name = "Hunspell_create"]
     fn hunspell_create(affpath: *const c_char, dpath: *const c_char) -> *mut Hunhandle;

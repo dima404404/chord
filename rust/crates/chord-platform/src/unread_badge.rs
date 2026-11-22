@@ -13,7 +13,9 @@
 
 use std::fmt;
 
-use crate::dbus::{BusAddress, Connection, DbusError, Signal, Value};
+use crate::dbus::{Signal, Value};
+#[cfg(unix)]
+use crate::dbus::{BusAddress, Connection, DbusError};
 
 /// Максимальное число, отображаемое цифрой на бейдже; всё что выше — точка переполнения.
 pub const BADGE_NUMERIC_MAX: u32 = 10;
@@ -319,11 +321,13 @@ impl OsBadgeBackend for MockOsBadgeBackend {
 }
 
 /// Живой D-Bus бэкенд для Linux Unity / Freedesktop LauncherEntry.
+#[cfg(unix)]
 pub struct DbusUnityBadgeBackend {
     connection: Connection,
     app_uri: String,
 }
 
+#[cfg(unix)]
 impl DbusUnityBadgeBackend {
     /// Создаёт бэкенд поверх установленного D-Bus соединения.
     pub fn new(connection: Connection, app_uri: impl Into<String>) -> Self {
@@ -349,6 +353,7 @@ impl DbusUnityBadgeBackend {
     }
 }
 
+#[cfg(unix)]
 impl OsBadgeBackend for DbusUnityBadgeBackend {
     fn apply_badge(&mut self, update: &OsBadgeUpdate) -> Result<(), UnreadBadgeError> {
         let mut unity = update.linux_unity.clone();
@@ -440,6 +445,7 @@ impl<B: OsBadgeBackend> UnreadBadgeController<B> {
     }
 }
 
+#[cfg(unix)]
 fn format_dbus_error(err: &DbusError) -> String {
     match err {
         DbusError::Address => "некорректный адрес D-Bus".to_string(),

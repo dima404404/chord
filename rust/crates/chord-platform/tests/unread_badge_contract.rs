@@ -8,17 +8,26 @@
 //! - Платформенные payload'ы: Linux Unity D-Bus signal (`emit_signal`), Windows Taskbar overlay icon (16x16 RGBA), macOS Dock badge
 //! - Отказоустойчивость при недоступном бэкенде
 
+#[cfg(unix)]
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(unix)]
 use std::thread;
 
+#[cfg(unix)]
 use chord_platform::dbus::message::{self, MessageType};
+#[cfg(unix)]
 use chord_platform::dbus::{BusAddress, Connection, Value};
 use chord_platform::unread_badge::{
-    BADGE_NUMERIC_MAX, DEFAULT_APP_URI, DbusUnityBadgeBackend, MacOsDockBadge, MockOsBadgeBackend,
-    OVERFLOW_DOT_GLYPH, OsBadgeUpdate, UNITY_LAUNCHER_ENTRY_INTERFACE, UNITY_LAUNCHER_ENTRY_SIGNAL,
-    UnreadBadgeController, UnreadBadgeDisplay, UnreadBadgeError, UnreadBadgeSettings,
-    WindowsOverlayKind, WindowsTaskbarOverlay,
+    BADGE_NUMERIC_MAX, DEFAULT_APP_URI, MacOsDockBadge, MockOsBadgeBackend, OVERFLOW_DOT_GLYPH,
+    OsBadgeUpdate, UnreadBadgeController, UnreadBadgeDisplay, UnreadBadgeError,
+    UnreadBadgeSettings, WindowsOverlayKind, WindowsTaskbarOverlay,
+};
+
+#[cfg(unix)]
+use chord_platform::unread_badge::{
+    DbusUnityBadgeBackend, UNITY_LAUNCHER_ENTRY_INTERFACE, UNITY_LAUNCHER_ENTRY_SIGNAL,
 };
 
 #[test]
@@ -142,6 +151,7 @@ fn r4_03_windows_taskbar_and_macos_dock_payloads() {
 }
 
 #[test]
+#[cfg(unix)]
 fn r4_03_linux_unity_dbus_signal_wire_emission() {
     // Создаём временный unix-сокет и имитируем D-Bus брокер (AUTH EXTERNAL + Hello + приём Signal)
     let dir = std::env::temp_dir().join(format!("chord-r4-03-dbus-{}", std::process::id()));
