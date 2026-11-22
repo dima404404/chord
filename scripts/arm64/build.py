@@ -19,7 +19,7 @@ import tarfile
 import tempfile
 
 from verify import (EnvironmentFailure, IntegrityError, artifact_names, check_pinned_file,
-                    command_output, read_sums, sha256_file, validate_elf, verify_release)
+                    command_output, read_sums, sha256_file, validate_elf, validate_gui_application, verify_release)
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = "aarch64-unknown-linux-gnu"
@@ -50,6 +50,8 @@ def arguments():
                         help="local official ARM64 runtime matching toolchain-pins.json; never downloaded")
     parser.add_argument("--appimagetool", default=os.environ.get("CHORD_ARM64_APPIMAGETOOL"),
                         help="local pinned official AppImage for this build host; never downloaded")
+    parser.add_argument("--sbom-file", default=os.environ.get("CHORD_ARM64_SBOM_FILE"),
+                        help="current SPDX-2.3 document generated from the locked chord-gpui workspace")
     parser.add_argument("--sysroot", default=os.environ.get("CHORD_ARM64_SYSROOT"),
                         help="complete ARM64 Linux development sysroot; native ARM64 defaults to /")
     parser.add_argument("--pkg-config-libdir", default=os.environ.get("CHORD_ARM64_PKG_CONFIG_LIBDIR"),
@@ -116,6 +118,19 @@ def appimagetool_file(args, pins):
     check_pinned_file(path, pin)
     if not os.access(path, os.X_OK):
         raise EnvironmentFailure("pinned appimagetool must be executable")
+    return path
+
+
+def sbom_file(args):
+    if not args.sbom_file or not Path(args.sbom_file).is_file():
+        raise EnvironmentFailure("supply --sbom-file/CHORD_ARM64_SBOM_FILE with the current GPUI SPDX document")
+    path = Path(args.sbom_file).resolve()
+    document = json.loads(path.read_text())
+    lock_digest = sha256_file(ROOT / "rust/chord-gpui/Cargo.lock")
+    if (document.get("spdxVersion") != "SPDX-2.3"
+            or document.get("documentNamespace") != f"https://discord-lab.local/spdx/{lock_digest}"
+            or not any(package.get("name") == "chord-gpui" for package in document.get("packages", []))):
+        raise IntegrityError("SBOM must describe chord-gpui and match its current Cargo.lock digest")
     return path
 
 
@@ -186,7 +201,7 @@ def assert_untracked(path):
 
 def validate_output_paths(args):
     reserved = {str(args.output / name) for name in (*artifact_names(args.version).values(),
-                "SHA256SUMS", "arm64-build-provenance.json", "cargo-config-aarch64.toml")}
+                "SHA256SUMS", "arm64-build-provenance.json", "cargo-config-aarch64.toml", "sbom.spdx.json")}
     if args.report_json and str(args.report_json.resolve()) in reserved:
         raise IntegrityError("--report-json must not overwrite a release artifact")
     if args.cargo_config and str(args.cargo_config.resolve()) in reserved - {str(args.output / "cargo-config-aarch64.toml")}:
@@ -233,9 +248,11 @@ def package_tar(args, stage, epoch):
     source.mkdir()
     shutil.copy2(stage / artifact_names(args.version)["binary"], source / "discord-gpui")
     shutil.copy2(stage / "cargo-config-aarch64.toml", source)
-    for document in ("LICENSE-MIT", "LICENSE-APACHE", "RELEASE-NOTES-v1.0.0-beta.1.md"):
-        if (ROOT / document).is_file():
-            shutil.copy2(ROOT / document, source)
+    shutil.copy2(args.sbom_file, stage / "sbom.spdx.json")
+    shutil.copy2(stage / "sbom.spdx.json", source)
+    shutil.copy2(ROOT / "docs/BETA-TESTING-GUIDE.md", source / "BETA-TESTING-GUIDE.md")
+    for document in ("LICENSE", "RELEASE-NOTES-v1.0.0-beta.1.md"):
+        shutil.copy2(ROOT / document, source)
     def normalize(member):
         member.uid = member.gid = 0
         member.uname = member.gname = "root"
@@ -248,18 +265,25 @@ def package_tar(args, stage, epoch):
 
 
 def package_deb(args, stage, tools):
+    template = stage / "deb-template"
+    shutil.copytree(ROOT / "packaging/deb", template)
+    documentation = template / "usr/share/doc/discord-gpui"
+    documentation.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / "LICENSE", documentation / "LICENSE")
+    # Ship the actual source license rather than the stale dual-license template.
+    shutil.copy2(ROOT / "LICENSE", documentation / "copyright")
     code = ('import {pathToFileURL} from "node:url"; '
-            'const {buildDebPackage}=await import(pathToFileURL(process.argv[1]).href); '
-            'buildDebPackage({debRootDir:process.argv[2],binaryPath:process.argv[3],'
-            'outputDebPath:process.argv[4],version:process.argv[5],architecture:"arm64"});')
+            'const {buildDebPackage}=await import(pathToFileURL(process.argv[2]).href); '
+            'buildDebPackage({debRootDir:process.argv[3],binaryPath:process.argv[4],'
+            'outputDebPath:process.argv[5],version:process.argv[6],architecture:"arm64"});')
     names = artifact_names(args.version)
     version = re.sub(r"-beta\.(\d+)", r"~beta\1", args.version) + "-1"
     subprocess.run([tools["node"], "--input-type=module", "-e", code,
-                    str(ROOT / "packaging/deb/deb-package.mjs"), str(ROOT / "packaging/deb"),
+                    "arm64-package-deb", str(ROOT / "packaging/deb/deb-package.mjs"), str(template),
                     str(stage / names["binary"]), str(stage / names["deb"]), version], check=True, cwd=ROOT)
 
 
-def package_appimage(args, stage, tool, runtime):
+def stage_appdir(args, stage):
     appdir = stage / "DiscordGpui.AppDir"
     (appdir / "usr/bin").mkdir(parents=True)
     for source, destination in ((ROOT / "packaging/appimage/AppRun", appdir / "AppRun"),
@@ -268,6 +292,21 @@ def package_appimage(args, stage, tool, runtime):
             (ROOT / "rust/gui-spike/icons/icon.png", appdir / "discord-gpui.png"),
             (ROOT / "rust/gui-spike/icons/icon.png", appdir / ".DirIcon")):
         shutil.copy2(source, destination)
+    (appdir / "usr/lib").mkdir()
+    documentation = appdir / "usr/share/doc/discord-gpui"
+    documentation.mkdir(parents=True)
+    shutil.copy2(ROOT / "LICENSE", documentation / "LICENSE")
+    dynamic = command_output(["readelf", "--dynamic", stage / artifact_names(args.version)["binary"]]).decode()
+    (appdir / "usr/lib/bundled-deps.json").write_text(json.dumps({
+        "schema_version": 1, "bundled": False, "native_validation": "not_run",
+        "elf_needed": re.findall(r"\(NEEDED\).*?\[(.*?)\]", dynamic),
+        "note": "System ABI libraries are required on the target host; no libraries are bundled.",
+    }, indent=2) + "\n")
+    return appdir
+
+
+def package_appimage(args, stage, tool, runtime):
+    appdir = stage_appdir(args, stage)
     env = {**os.environ, "ARCH": "aarch64", "APPIMAGE_EXTRACT_AND_RUN": "1"}
     subprocess.run([str(tool), "--runtime-file", str(runtime), str(appdir),
                     str(stage / artifact_names(args.version)["appimage"])], env=env, check=True)
@@ -291,12 +330,13 @@ def write_metadata(args, stage, command, identity, runtime, tool, artifact):
                     "elf_needed": re.findall(r"\(NEEDED\).*?\[(.*?)\]", dynamic)}
     provenance = {"schema_version": 1, "cargo_command": command, "serialized_with": "/tmp/chord-cargo.lock",
                   "source": identity, "binary_sha256": sha256_file(binary),
+                  "sbom_sha256": sha256_file(stage / "sbom.spdx.json"),
                   "cargo_reported_artifact": {key: artifact[key] for key in ("executable", "package_id", "fresh")},
                   "runtime_sha256": sha256_file(runtime), "appimagetool_sha256": sha256_file(tool),
                   "profile": args.profile, "target_cpu": CPUS[args.profile], "native_validation": "not_run",
                   "host_abi_requirements": requirements}
     (stage / "arm64-build-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
-    files = [*artifact_names(args.version).values(), "arm64-build-provenance.json", "cargo-config-aarch64.toml"]
+    files = [*artifact_names(args.version).values(), "arm64-build-provenance.json", "cargo-config-aarch64.toml", "sbom.spdx.json"]
     (stage / "SHA256SUMS").write_text("".join(f"{sha256_file(stage / name)}  {name}\n" for name in files))
 
 
@@ -345,6 +385,7 @@ def run_cargo(command, tools, env, expected_binary, lock_file="/tmp/chord-cargo.
 def build_release(args, pins):
     tools = required_tools()
     runtime, tool = runtime_file(args, pins), appimagetool_file(args, pins)
+    args.sbom_file = sbom_file(args)
     assert_publishable(args)
     overrides = [key for key in os.environ if key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS")
                  or key.startswith("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_")]
@@ -364,7 +405,7 @@ def build_release(args, pins):
         artifact = run_cargo(command, tools, env, binary)
         if source_identity() != identity:
             raise IntegrityError("source/dependency identity changed during the locked build")
-        validate_elf(binary)
+        validate_gui_application(binary)
         shutil.copy2(binary, stage / artifact_names(args.version)["binary"])
         epoch = int(os.environ.get("SOURCE_DATE_EPOCH") or command_output(
             [tools["git"], "-C", ROOT, "show", "-s", "--format=%ct", "HEAD"]).decode().strip())

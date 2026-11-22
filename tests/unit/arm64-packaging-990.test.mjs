@@ -28,18 +28,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { selectArmCandidate, cargoEnvironmentValue, verifyCandidateApplication, assertSourceLicense, inspectOfficialArmAppImage } from "../helpers/arm64-candidate-oracle.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const BUILD_SCRIPT = join(ROOT, "scripts", "build-arm64.sh");
-const DIST_DIR = join(ROOT, "rust", "dist");
+const { candidate: CANDIDATE, dist: DIST_DIR, version: VERSION } = selectArmCandidate(process.env, ROOT);
 const SHA256SUMS_PATH = join(DIST_DIR, "SHA256SUMS");
 const CARGO_CONFIG_DIST_PATH = join(DIST_DIR, "cargo-config-aarch64.toml");
 const CARGO_CONFIG_PKG_PATH = join(ROOT, "packaging", "arm64", "cargo-config.toml");
 
-const VERSION = "1.0.0-beta.1";
 const ARM64_BIN_NAME = "discord-gpui-aarch64";
 const ARM64_TARBALL_NAME = `discord-gpui-v${VERSION}-linux-aarch64.tar.gz`;
 const ARM64_DEB_NAME = `discord-gpui_${VERSION}_arm64.deb`;
@@ -206,6 +206,9 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
         `Конфигурация кросс-компиляции Cargo должна существовать: ${cfgPath}`,
       );
       const parsed = parseTomlWithPythonOracle(cfgPath);
+      const generated = CANDIDATE && cfgPath === CARGO_CONFIG_DIST_PATH;
+      /** @param {string} key */
+      const envValue = (key) => cargoEnvironmentValue(parsed, generated, key);
       assert.equal(
         parsed.build?.target,
         "aarch64-unknown-linux-gnu",
@@ -217,8 +220,8 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
         targetCfg && typeof targetCfg === "object",
         "Должна присутствовать секция [target.aarch64-unknown-linux-gnu]",
       );
-      assert.equal(targetCfg.linker, "clang");
-      assert.equal(targetCfg.ar, "llvm-ar");
+      assert.equal(generated ? basename(targetCfg.linker) : targetCfg.linker, "clang");
+      assert.equal(generated ? basename(envValue("AR_aarch64_unknown_linux_gnu")) : targetCfg.ar, "llvm-ar");
       assert.ok(
         Array.isArray(targetCfg.rustflags),
         "rustflags должен быть массивом строк",
@@ -234,11 +237,20 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
 
       const envCfg = parsed.env;
       assert.ok(envCfg && typeof envCfg === "object", "Должна присутствовать секция [env]");
-      assert.equal(envCfg.CC_aarch64_unknown_linux_gnu, "clang");
-      assert.equal(envCfg.CXX_aarch64_unknown_linux_gnu, "clang++");
-      assert.equal(envCfg.AR_aarch64_unknown_linux_gnu, "llvm-ar");
-      assert.equal(envCfg.PKG_CONFIG_ALLOW_CROSS, "1");
-      assert.equal(envCfg.PKG_CONFIG_SYSROOT_DIR, "/usr/aarch64-linux-gnu");
+      const envTools = /** @type {Array<[string, string]>} */ ([["CC_aarch64_unknown_linux_gnu", "clang"],
+        ["CXX_aarch64_unknown_linux_gnu", "clang++"], ["AR_aarch64_unknown_linux_gnu", "llvm-ar"]]);
+      for (const [key, tool] of envTools) {
+        assert.equal(generated ? basename(envValue(key)) : envValue(key), tool);
+      }
+      assert.equal(envValue("PKG_CONFIG_ALLOW_CROSS"), "1");
+      if (generated) {
+        const sysroot = envValue("PKG_CONFIG_SYSROOT_DIR");
+        assert.ok(isAbsolute(sysroot), "The actual build sysroot must be absolute");
+        assert.ok(targetCfg.rustflags.includes(`link-arg=--sysroot=${sysroot}`));
+        assert.ok(envValue("CFLAGS_aarch64_unknown_linux_gnu").includes(`--sysroot=${sysroot}`));
+      } else {
+        assert.equal(envValue("PKG_CONFIG_SYSROOT_DIR"), "/usr/aarch64-linux-gnu");
+      }
     }
   });
 
@@ -313,10 +325,15 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
     assert.match(readelfRes.stdout, /GNU_STACK/, "Должен присутствовать сегмент GNU_STACK");
     assert.match(readelfRes.stdout, /NT_GNU_BUILD_ID/, "Должна присутствовать секция NT_GNU_BUILD_ID");
 
-    // 4. Проверка встроенного контракта метаданных и маркера GPUI_SMOKE_OK внутри бинарника
+    // Runtime JSON is serialized by the real application, not stored as a fixed success line.
     const binText = binBuf.toString("utf8");
-    assert.match(binText, /GPUI_SMOKE_OK \{/);
-    assert.match(binText, /aarch64-unknown-linux-gnu/);
+    if (CANDIDATE) {
+      verifyCandidateApplication(ROOT, DIST_DIR, "generic");
+      assert.match(binText, /GPUI_SMOKE_OK /);
+    } else {
+      assert.match(binText, /GPUI_SMOKE_OK \{/);
+      assert.match(binText, /aarch64-unknown-linux-gnu/);
+    }
   });
 
   it("SUB-990-3: собирает и верифицирует ARM64 пакеты .tar.gz, .deb (Architecture: arm64) и Type 2 .AppImage (EM_AARCH64)", async () => {
@@ -355,8 +372,7 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
 
       for (const reqFile of [
         "discord-gpui",
-        "LICENSE-MIT",
-        "LICENSE-APACHE",
+        ...(CANDIDATE ? ["LICENSE"] : ["LICENSE-MIT", "LICENSE-APACHE"]),
         "sbom.spdx.json",
         "BETA-TESTING-GUIDE.md",
         "RELEASE-NOTES-v1.0.0-beta.1.md",
@@ -371,6 +387,11 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
       const binEntry = entries.find((e) => e === "discord-gpui" || e.endsWith("/discord-gpui"));
       assert.ok(binEntry);
       const extractedTarBin = join(tarDir, binEntry);
+      if (CANDIDATE) {
+        const licenseEntry = entries.find((entry) => entry === "LICENSE" || entry.endsWith("/LICENSE"));
+        assert.ok(licenseEntry);
+        assert.deepEqual(readFileSync(join(tarDir, licenseEntry)), readFileSync(join(ROOT, "LICENSE")));
+      }
       assert.equal(
         sha256File(extractedTarBin),
         expectedBinSha,
@@ -442,6 +463,10 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
         "SHA-256 бинарника usr/bin/discord-gpui внутри arm64.deb должен совпадать с discord-gpui-aarch64",
       );
       const md5sumsText = readFileSync(join(debCtrlDir, "md5sums"), "utf8");
+      if (CANDIDATE) {
+        assert.deepEqual(readFileSync(join(debDataDir, "usr/share/doc/discord-gpui/LICENSE")), readFileSync(join(ROOT, "LICENSE")));
+        assert.doesNotMatch(readFileSync(join(debDataDir, "usr/share/doc/discord-gpui/copyright"), "utf8"), /MIT or Apache/);
+      }
       const expectedDebBinMd5 = createHash("md5").update(readFileSync(debBinPath)).digest("hex");
       assert.ok(
         md5sumsText.includes(`${expectedDebBinMd5}  usr/bin/discord-gpui`),
@@ -468,7 +493,10 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
         "Рантайм ARM64 AppImage должен быть скомпилирован под EM_AARCH64 (183)",
       );
 
-      // Проверка 64-байтного трейлера AI2PAYLOAD и распаковка встроенного AppDir
+      if (CANDIDATE) {
+        inspectOfficialArmAppImage(ROOT, ARM64_APPIMAGE_PATH, join(tmp, "official-appdir-extract"), expectedBinSha);
+      } else {
+      // Historical custom container assertions remain exact for the legacy artifact family.
       assert.ok(appImageBuf.length > 4096 + 64);
       const trailerBuf = appImageBuf.subarray(appImageBuf.length - 64);
       assert.equal(
@@ -503,6 +531,7 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
       assert.ok(existsSync(join(appDirExtract, "AppRun")));
       assert.ok(existsSync(join(appDirExtract, "discord-gpui.desktop")));
       assert.ok(existsSync(join(appDirExtract, "usr", "lib", "bundled-deps.json")));
+      }
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -519,7 +548,7 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
       [ARM64_DEB_NAME, ARM64_DEB_PATH],
       [ARM64_APPIMAGE_NAME, ARM64_APPIMAGE_PATH],
       ["discord-gpui", join(DIST_DIR, "discord-gpui")],
-      ["discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz", join(DIST_DIR, "discord-gpui-v1.0.0-beta.1-linux-x86_64.tar.gz")],
+      [`discord-gpui-v${VERSION}-linux-x86_64.tar.gz`, join(DIST_DIR, `discord-gpui-v${VERSION}-linux-x86_64.tar.gz`)],
       ["sbom.spdx.json", join(DIST_DIR, "sbom.spdx.json")],
     ];
     for (const [name, fullPath] of expectedEntries) {
@@ -556,6 +585,8 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
           "--verify",
           "--output",
           DIST_DIR,
+          "--version",
+          VERSION,
           "--report-json",
           reportPath,
         ],
@@ -610,7 +641,8 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
       );
 
       // 3. Изолированная сборка с профилем rpi5 (Raspberry Pi 5 Cortex-A76) и проверка маскирования токенов
-      const rpiDist = join(tmp, "rpi5-dist");
+      const rpiDist = CANDIDATE ? join(DIST_DIR, "qa-profiles/rpi5") : join(tmp, "rpi5-dist");
+      const profileVersion = CANDIDATE ? VERSION : "1.0.0-rc.1";
       const rpiReportPath = join(tmp, "rpi5-report.json");
       const fakeDiscordToken = "mfa.SecretTokenValueForArm64Test123456789";
       const fakeGhToken = "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD";
@@ -622,7 +654,7 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
           "--output",
           rpiDist,
           "--version",
-          "1.0.0-rc.1",
+          profileVersion,
           "--profile",
           "rpi5",
           "--report-json",
@@ -666,14 +698,15 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
 
       // Проверка профиля asahi (Apple Silicon M1/M2)
       const asahiCargoPath = join(tmp, "asahi-cargo.toml");
+      const asahiDist = CANDIDATE ? join(DIST_DIR, "qa-profiles/asahi") : rpiDist;
       const asahiDry = spawnSync(
         "bash",
         [
           BUILD_SCRIPT,
           "--output",
-          rpiDist,
+          asahiDist,
           "--version",
-          "1.0.0-rc.1",
+          profileVersion,
           "--profile",
           "asahi",
           "--cargo-config",
@@ -691,7 +724,7 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
       );
 
       // 4. Негативный сценарий: повреждение байтов в архиве роняет --verify и sha256sum -c с кодом 1
-      const rpiTarPath = join(rpiDist, "discord-gpui-v1.0.0-rc.1-linux-aarch64.tar.gz");
+      const rpiTarPath = join(rpiDist, `discord-gpui-v${profileVersion}-linux-aarch64.tar.gz`);
       const origTarBytes = readFileSync(rpiTarPath);
       const corruptedTarBytes = Buffer.from(origTarBytes);
       const corruptIdx = corruptedTarBytes.length - 10;
@@ -700,7 +733,7 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
 
       const badVerifySha = spawnSync(
         "bash",
-        [BUILD_SCRIPT, "--verify", "--output", rpiDist, "--version", "1.0.0-rc.1"],
+        [BUILD_SCRIPT, "--verify", "--output", rpiDist, "--version", profileVersion],
         { cwd: ROOT, encoding: "utf8" },
       );
       assert.equal(
@@ -719,7 +752,7 @@ describe("TASK-990: Кросс-компиляция и пакеты для Linux
 
       const badArchVerify = spawnSync(
         "bash",
-        [BUILD_SCRIPT, "--verify", "--output", rpiDist, "--version", "1.0.0-rc.1"],
+        [BUILD_SCRIPT, "--verify", "--output", rpiDist, "--version", profileVersion],
         { cwd: ROOT, encoding: "utf8" },
       );
       assert.equal(

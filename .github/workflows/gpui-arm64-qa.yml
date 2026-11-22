@@ -1,0 +1,137 @@
+name: GPUI ARM64 candidate QA
+
+on:
+  push:
+    branches: ['qa/task-990-gpui-arm64-*']
+  workflow_dispatch:
+    inputs:
+      qa_version:
+        description: Private QA artifact version (no release is published)
+        required: false
+        default: '1.0.0-qa.1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpui-arm64-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: GPUI ARM64 (${{ matrix.profile }})
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    # Native ARM CPU, Jammy userspace. This is the official linux/arm64/v8 child
+    # manifest, independently resolved from docker.io/library/ubuntu:22.04.
+    container:
+      image: ubuntu@sha256:2926e8e6ef0b816e19849e33ccc728c72b921a428286e6595d52fa92c5716626
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        profile: [generic, rpi5, asahi]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_TERM_COLOR: never
+      CARGO_TARGET_DIR: target/gpui-arm64-qa
+      ARM_QA_PROFILE: ${{ matrix.profile }}
+      CHORD_GPUI_TEST_VERSION: ${{ inputs.qa_version || '1.0.0-qa.1' }}
+    steps:
+      - name: Official Jammy development libraries
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential clang libclang-dev lld llvm pkg-config git ca-certificates \
+            curl gh binutils tar gzip squashfs-tools dpkg-dev util-linux xz-utils \
+            libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev \
+            libxcb1-dev libx11-xcb-dev libwebkit2gtk-4.1-dev libsecret-1-dev \
+            libpipewire-0.3-dev libenchant-2-dev libhunspell-dev libssl-dev libzstd-dev
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.3'
+          architecture: arm64
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.100.0'
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gpui-arm64-jammy-${{ matrix.profile }}
+          workspaces: rust/chord-gpui -> ../../target/gpui-arm64-qa
+          cache-on-failure: true
+
+      - name: Verify native host and exact GPUI source
+        run: |
+          test "$(uname -m)" = aarch64
+          test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.35'
+          node -e 'if (process.arch !== "arm64") throw new Error("Native ARM64 Node is required")'
+          python3 -c 'import sys,tomllib,hashlib; assert sys.version_info >= (3,11)'
+          node scripts/bootstrap-gpui.mjs
+          node scripts/bootstrap-gpui.mjs --check
+          if [ "$ARM_QA_PROFILE" = generic ]; then
+            armQaOutput="$GITHUB_WORKSPACE/target/arm64-qa-dist"
+          else
+            armQaOutput="$GITHUB_WORKSPACE/target/arm64-qa-dist/qa-profiles/$ARM_QA_PROFILE"
+          fi
+          printf 'ARM_QA_OUTPUT=%s\n' "$armQaOutput" >> "$GITHUB_ENV"
+          printf 'CHORD_GPUI_TEST_DIST=%s\n' "$armQaOutput" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/arm64-official-tools"
+          printf 'CHORD_ARM64_RUNTIME_FILE=%s\n' "$RUNNER_TEMP/arm64-official-tools/runtime-aarch64" >> "$GITHUB_ENV"
+          printf 'CHORD_ARM64_APPIMAGETOOL=%s\n' "$RUNNER_TEMP/arm64-official-tools/appimagetool-aarch64.AppImage" >> "$GITHUB_ENV"
+          printf 'CHORD_ARM64_SBOM_FILE=%s\n' "$RUNNER_TEMP/gpui-arm64.spdx.json" >> "$GITHUB_ENV"
+
+      - name: Acquire and verify the exact official AppImage assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runtimeUrl="$(python3 -c 'import json; print(json.load(open("packaging/arm64/toolchain-pins.json"))["runtime"]["asset_api_url"])')"
+          toolUrl="$(python3 -c 'import json; print(json.load(open("packaging/arm64/toolchain-pins.json"))["appimagetool"]["assets"]["aarch64"]["asset_api_url"])')"
+          gh api --header 'Accept: application/octet-stream' "$runtimeUrl" > "$CHORD_ARM64_RUNTIME_FILE"
+          gh api --header 'Accept: application/octet-stream' "$toolUrl" > "$CHORD_ARM64_APPIMAGETOOL"
+          python3 -c 'import json,sys,os; sys.path.insert(0,"scripts/arm64"); from verify import check_pinned_file; p=json.load(open("packaging/arm64/toolchain-pins.json")); check_pinned_file(os.environ["CHORD_ARM64_RUNTIME_FILE"],p["runtime"]); check_pinned_file(os.environ["CHORD_ARM64_APPIMAGETOOL"],p["appimagetool"]["assets"]["aarch64"])'
+          chmod +x "$CHORD_ARM64_APPIMAGETOOL"
+
+      - name: Fetch the locked dependency graph and generate the actual GPUI SBOM
+        run: |
+          cargo fetch --locked --manifest-path rust/chord-gpui/Cargo.toml
+          node scripts/sbom.mjs --manifest-path rust/chord-gpui/Cargo.toml --output "$CHORD_ARM64_SBOM_FILE"
+
+      - name: Build and inspect the real profile packages
+        id: packages
+        run: |
+          bash scripts/build-arm64.sh --output "$ARM_QA_OUTPUT" \
+            --version "$CHORD_GPUI_TEST_VERSION" --profile "$ARM_QA_PROFILE" \
+            --report-json "$ARM_QA_OUTPUT/build-report.json"
+          bash scripts/build-arm64.sh --verify --output "$ARM_QA_OUTPUT" --version "$CHORD_GPUI_TEST_VERSION"
+          cp "$CHORD_ARM64_RUNTIME_FILE" "$ARM_QA_OUTPUT/runtime-aarch64"
+          { uname -a; getconf PAGESIZE; rustc --version --verbose; node --version; python3 --version; clang --version; df -h .; } > "$ARM_QA_OUTPUT/native-host.txt"
+          dpkg-query -W > "$ARM_QA_OUTPUT/environment-packages.txt"
+          (cd "$ARM_QA_OUTPUT" && sha256sum build-report.json runtime-aarch64 native-host.txt environment-packages.txt >> SHA256SUMS)
+
+      - name: Native generic headless system contract
+        if: matrix.profile == 'generic'
+        run: |
+          node scripts/verify-system-requirements.mjs --binary "$ARM_QA_OUTPUT/discord-gpui-aarch64" \
+            --out-json "$ARM_QA_OUTPUT/native-headless-system-report.json"
+
+      - name: Upload genuine packages and provenance
+        if: always() && steps.packages.outcome == 'success'
+        uses: actions/upload-artifact@v6
+        with:
+          name: gpui-arm64-qa-${{ matrix.profile }}-${{ github.sha }}
+          path: target/arm64-qa-dist/
+          if-no-files-found: error
+          retention-days: 14

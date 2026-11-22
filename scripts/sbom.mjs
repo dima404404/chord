@@ -39,12 +39,12 @@ function parseLock(text) {
   return packages;
 }
 
-/** @returns {{packages: MetaPackage[], workspace: string[]}} */
-function loadMetadata() {
+/** @param {string} manifestPath @returns {{packages: MetaPackage[], workspace: string[]}} */
+function loadMetadata(manifestPath) {
   // Cargo.lock includes optional and platform-specific dependencies.
   const args = [
     'metadata', '--locked', '--offline', '--all-features', '--format-version', '1',
-    '--manifest-path', join(root, 'rust', 'Cargo.toml'),
+    '--manifest-path', manifestPath,
   ];
   /** @type {string} */
   let text;
@@ -272,6 +272,7 @@ function buildDocument(lockText, lockPackages, metadata) {
 function main() {
   const args = process.argv.slice(2);
   let output = join(root, 'rust', 'dist', 'sbom.spdx.json');
+  let manifestPath = join(root, 'rust', 'Cargo.toml');
   let check = false;
   let dryRun = false;
   /** @type {string|null} */
@@ -282,6 +283,11 @@ function main() {
       const value = args[i + 1];
       if (!value) throw new Error('--output требует путь');
       output = resolve(value);
+      i += 1;
+    } else if (arg === '--manifest-path') {
+      const value = args[i + 1];
+      if (!value) throw new Error('--manifest-path requires a Cargo.toml path');
+      manifestPath = resolve(value);
       i += 1;
     } else if (arg === '--check') check = true;
     else if (arg === '--dry-run') dryRun = true;
@@ -298,9 +304,9 @@ function main() {
     return 1;
   }
 
-  const lockText = readFileSync(join(root, 'rust', 'Cargo.lock'), 'utf8');
+  const lockText = readFileSync(join(dirname(manifestPath), 'Cargo.lock'), 'utf8');
   const lockPackages = parseLock(lockText);
-  const document = buildDocument(lockText, lockPackages, loadMetadata());
+  const document = buildDocument(lockText, lockPackages, loadMetadata(manifestPath));
   if (check) {
     const rejected = document.packages.filter((pkg) => !allowedLicense(pkg.licenseDeclared));
     if (rejected.length) {

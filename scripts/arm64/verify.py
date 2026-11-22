@@ -83,6 +83,19 @@ def validate_elf(path, gui=True):
             "interpreter": interpreter, "page_size_bytes": min(loads), "full_relro": True}
 
 
+def validate_gui_application(path):
+    """Reject syscall-only smoke specimens; source and runtime need separate evidence."""
+    result = validate_elf(path)
+    dynamic = command_output(["readelf", "--wide", "--dynamic", path]).decode()
+    needed = re.findall(r"\(NEEDED\).*?\[(.*?)\]", dynamic)
+    versions = command_output(["readelf", "--wide", "--version-info", path]).decode()
+    if "libc.so.6" not in needed or not re.search(r"File: libc\.so\.6\b", versions):
+        raise IntegrityError("GUI application must link versioned libc.so.6; a synthetic smoke harness is not an application")
+    if b"GPUI_SMOKE_OK " not in Path(path).read_bytes():
+        raise IntegrityError("GUI application lacks the actual Chord headless-smoke entrypoint marker")
+    return {**result, "elf_needed": needed}
+
+
 def md5_section(runtime):
     offset = struct.unpack_from("<Q", runtime, 40)[0]
     width, count, strings_index = struct.unpack_from("<HHH", runtime, 58)
@@ -180,12 +193,12 @@ def verify_checksums(directory, required):
 
 def verify_release(directory, version, runtime, pins):
     names = artifact_names(version)
-    required = [*names.values(), "SHA256SUMS", "arm64-build-provenance.json", "cargo-config-aarch64.toml"]
+    required = [*names.values(), "SHA256SUMS", "arm64-build-provenance.json", "cargo-config-aarch64.toml", "sbom.spdx.json"]
     if any(not (directory / name).is_file() for name in required):
         raise EnvironmentFailure("required ARM64 release files/provenance are unavailable")
     check_pinned_file(runtime, pins["runtime"])
     sums = verify_checksums(directory, [name for name in required if name != "SHA256SUMS"])
-    result = validate_elf(directory / names["binary"])
+    result = validate_gui_application(directory / names["binary"])
     digest = sums[names["binary"]]
     with tarfile.open(directory / names["tarball"], "r:gz") as archive:
         tar_hash = tar_binary_hash(archive, f"discord-gpui-v{version}-linux-aarch64/discord-gpui")
@@ -198,6 +211,8 @@ def verify_release(directory, version, runtime, pins):
         raise IntegrityError("provenance lacks the locked Chord GUI build command")
     if provenance.get("binary_sha256") != digest or provenance.get("runtime_sha256") != pins["runtime"]["sha256"]:
         raise IntegrityError("provenance does not match binary/runtime content")
+    if provenance.get("sbom_sha256") != sums["sbom.spdx.json"]:
+        raise IntegrityError("provenance does not match the packaged SBOM")
     return {**result, "status": "passed", "packaging_integrity": "passed", "native_validation": "not_run",
             "version": version, "target": "aarch64-unknown-linux-gnu", "artifacts": {
                 key: {"filename": name, "size_bytes": (directory / name).stat().st_size,
