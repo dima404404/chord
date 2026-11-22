@@ -81,7 +81,12 @@ describe("Call and Stream Protocol & UI Contracts", () => {
     assert.match(startBody, /data::current_live_self_uid\(\)/, "stream key must use the actual user ID");
     const connect = DATA_RS.indexOf("pub fn connect_or_update_live_voice_ext(");
     assert.ok(connect > 0, "connect_or_update_live_voice_ext must exist");
-    const connectBody = DATA_RS.slice(connect, DATA_RS.indexOf("\n}", connect) + 2);
+    const entryBody = DATA_RS.slice(connect, DATA_RS.indexOf("\n}", connect) + 2);
+    assert.match(entryBody, /connect_or_update_live_voice_ext_with_scheduler\(/,
+      "the production voice entry point must use the implementation under test");
+    const scheduled = DATA_RS.indexOf("pub fn connect_or_update_live_voice_ext_with_scheduler(");
+    assert.ok(scheduled > 0, "voice-state implementation must exist");
+    const connectBody = DATA_RS.slice(scheduled, DATA_RS.indexOf("\n}", scheduled) + 2);
     assert.match(
       connectBody,
       /\n    chord_core::ws::queue_live_voice_state_ext\(\s*clean_gid\.clone\(\),\s*clean_cid\.clone\(\),\s*self_mute,\s*self_deaf,\s*self_video,\s*self_stream,\s*Some\(self_uid\.as_str\(\)\),\s*\)/,

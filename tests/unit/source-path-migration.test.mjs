@@ -16,9 +16,18 @@ test("historical crate paths resolve to the independently declared Cargo package
     const current = `rust/crates/${entry.name}/Cargo.toml`;
     const manifest = readFileSync(join(root, current), "utf8");
     assert.match(manifest, new RegExp(`name\\s*=\\s*"${entry.name}"`));
-    const historical = `rust/crates/discord-${entry.name.slice("chord-".length)}/Cargo.toml`;
-    assert.equal(canonicalRustSourcePath(historical), current);
+    // Common source checks apply to packages added after the rename too.
     assert.equal(canonicalRustSourcePath(current), current);
+  }
+  const historicalRoles = [
+    "app", "codec", "conformance", "core", "i18n", "json", "media", "perf",
+    "platform", "store", "ui", "updater", "voice",
+  ];
+  for (const role of historicalRoles) {
+    const current = "rust/crates/chord-" + role + "/Cargo.toml";
+    assert.ok(existsSync(join(root, current)));
+    const historical = `rust/crates/discord-${role}/Cargo.toml`;
+    assert.equal(canonicalRustSourcePath(historical), current);
   }
 });
 
@@ -35,6 +44,7 @@ test("historical GUI and voice source locations retain their exact suffixes", ()
 test("unknown packages, release artifact names and clean-room evidence are not rewritten", () => {
   for (const unchanged of [
     "rust/crates/discord-unknown/src/lib.rs", "rust/crates/discord-core-extra/src/lib.rs",
+    "rust/crates/discord-audio-runtime/src/lib.rs",
     "rust/dist/discord-gpui", "rust/dist/discord-gpui-linux.tar.gz",
     "rust/discord-gpui-extra/src/main.rs", "docs/re/discord-core.json",
     "/home/sanya/re-deep/rest-d02.json", "src/discord-core.mjs", "",

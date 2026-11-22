@@ -67,6 +67,8 @@ function compileRustModuleTests(sourcePath, outputBin, mutatedPath = MODULE_REL_
   }
   const platform = join(harness, "platform");
   cpSync(join(ROOT, "rust", "crates", "chord-platform"), platform, { recursive: true, force: true });
+  cpSync(join(ROOT, "rust", "crates", "chord-audio-runtime"), join(harness, "chord-audio-runtime"),
+    { recursive: true, force: true });
   if (mutatedPath !== MODULE_REL_PATH) {
     assert.equal(mutatedPath, "rust/crates/chord-platform/src/dbus/fd.rs");
     copyFileSync(sourcePath, join(platform, "src", "dbus", "fd.rs"));
@@ -97,7 +99,7 @@ warnings = "deny"
 
 [workspace]
 resolver = "2"
-members = ["platform"]
+members = ["platform", "chord-audio-runtime"]
 
 [workspace.package]
 ${workspacePackage.trim()}

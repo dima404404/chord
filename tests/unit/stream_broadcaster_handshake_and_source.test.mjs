@@ -41,7 +41,12 @@ describe("Stream Broadcaster Handshake, Source Normalization & Format Parity", (
   it("SB3: connect_or_update_live_voice_ext does not delay stream toggle with 120ms coalesce timer", () => {
     const fnIdx = dataRs.indexOf("pub fn connect_or_update_live_voice_ext(");
     assert.ok(fnIdx > 0, "connect_or_update_live_voice_ext must exist in data.rs");
-    const fnBody = dataRs.slice(fnIdx, fnIdx + 18000);
+    const entryBody = dataRs.slice(fnIdx, dataRs.indexOf("\n}", fnIdx) + 2);
+    assert.match(entryBody, /connect_or_update_live_voice_ext_with_scheduler\(/,
+      "the production voice entry point must use the implementation under test");
+    const implementation = dataRs.indexOf("pub fn connect_or_update_live_voice_ext_with_scheduler(");
+    assert.ok(implementation > 0, "voice-state implementation must exist in data.rs");
+    const fnBody = dataRs.slice(implementation, dataRs.indexOf("\n}", implementation) + 2);
     assert.match(
       fnBody,
       /stream_or_video_changed/,
