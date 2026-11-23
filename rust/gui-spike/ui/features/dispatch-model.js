@@ -1116,6 +1116,22 @@ export function projectMessageCreate(store, data, counters = emptyCounters()) {
     embeds,
   };
 
+  // Реакции приходят внутри MESSAGE_CREATE (история, REST, READY). Без этого
+  // store пуст после рестарта: MESSAGE_REACTION_REMOVE от себя игнорируется как
+  // «REMOVE без ADD», а повторный ADD считает мою же реакцию второй.
+  for (const raw of asArray(data.reactions)) {
+    const record = asRecord(raw);
+    const emoji = emojiOf(record.emoji);
+    if (emoji === "") continue;
+    const total = Math.max(0, Math.trunc(Number(record.count) || 0));
+    const users = new Set();
+    if (asBool(record.me) && store.selfUserId !== "") users.add(store.selfUserId);
+    store.reactions.set(`${channelId}:${messageId}:${emoji}`, {
+      users,
+      anon: Math.max(0, total - users.size),
+    });
+  }
+
   let channelMessages = store.messages.get(channelId);
   if (!channelMessages) {
     channelMessages = new Map();
