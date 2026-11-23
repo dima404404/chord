@@ -1023,11 +1023,18 @@ export function projectReaction(store, kind, data, counters = emptyCounters()) {
     state.users.add(userId);
   } else {
     if (!state.users.has(userId)) {
-      // REMOVE без ADD — no-op, счётчик не уходит в минус.
-      counters.ignored += 1;
-      return [];
+      // История приходит мимо dispatch (messages_page), поэтому после рестарта
+      // users пуст, а счётчик живёт в anon. REMOVE всё равно означает, что
+      // реакция была: уменьшаем anon, иначе снятие «не срабатывает».
+      if (state.anon > 0) {
+        state.anon -= 1;
+      } else {
+        counters.ignored += 1;
+        return [];
+      }
+    } else {
+      state.users.delete(userId);
     }
-    state.users.delete(userId);
   }
   const count = state.users.size + state.anon;
   if (count <= 0) store.reactions.delete(key);

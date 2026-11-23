@@ -86,4 +86,37 @@ describe('QA Contract — Feature: dispatch-model', () => {
     assert.equal(readded.changes[0].count, 1, 're-add must not double count');
     assert.equal(readded.counters.duplicate, 0);
   });
+
+  it('6. REMOVE applies when self id is unknown and the count lives in anon', async () => {
+    const { applyDispatch, createDispatchStore } = await import(
+      '../../rust/gui-spike/ui/features/dispatch-model.js'
+    );
+    const store = createDispatchStore();
+
+    applyDispatch(store, {
+      kind: 'MESSAGE_CREATE',
+      data: {
+        id: 'm2',
+        channel_id: 'c1',
+        author: { id: '42', username: 'me' },
+        content: 'x',
+        reactions: [{ emoji: { name: '✅' }, count: 1, me: true }],
+      },
+    });
+
+    const removed = applyDispatch(store, {
+      kind: 'MESSAGE_REACTION_REMOVE',
+      data: { channel_id: 'c1', message_id: 'm2', user_id: '42', emoji: { name: '✅' } },
+    });
+    assert.equal(removed.changes.length, 1, 'remove must not be ignored');
+    assert.equal(removed.changes[0].count, 0);
+    assert.equal(removed.counters.ignored, 0);
+
+    const added = applyDispatch(store, {
+      kind: 'MESSAGE_REACTION_ADD',
+      data: { channel_id: 'c1', message_id: 'm2', user_id: '42', emoji: { name: '✅' } },
+    });
+    assert.equal(added.changes.length, 1);
+    assert.equal(added.changes[0].count, 1, 're-add must be 1, not 2');
+  });
 });
